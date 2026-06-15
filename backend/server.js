@@ -1,119 +1,167 @@
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
-const cron = require('node-cron');
+const multer = require('multer');
+const FormData = require('form-data');
+const fs = require('fs');
+const path = require('path');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir);
+}
+const upload = multer({ dest: 'uploads/' });
+
 app.use(cors());
 app.use(express.json());
 
-// Memoria simple para almacenar publicaciones programadas
-let postQueue = [];
-
-app.post('/api/publish', async (req, res) => {
-  const { message } = req.body;
-  const pageId = process.env.PAGE_ID;
-  const accessToken = process.env.PAGE_ACCESS_TOKEN;
-
-  if (!message) {
-    return res.status(400).json({ error: 'Message is required' });
-  }
-  
-  if (!pageId || !accessToken) {
-    return res.status(500).json({ error: 'Facebook credentials not configured' });
-  }
-
-  try {
-    const response = await axios.post(`https://graph.facebook.com/v19.0/${pageId}/feed`, {
-      message: message,
-      access_token: accessToken
-    });
-
-    res.status(200).json({ success: true, data: response.data });
-  } catch (error) {
-    console.error('Error publishing to Facebook:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to publish message', details: error.response?.data || error.message });
-  }
-});
-
-/* ==========================================================
- *  Sistema de Programación Inteligente (Intervalo dinámico)
- * ========================================================== */
-let isPublishing = false;
-const TIMER_MINUTES = 10;
-
-async function processQueue() {
-  if (postQueue.length === 0) {
-    isPublishing = false;
-    console.log('\n[Sistema] Sistema procesador detenido (Cola vacía).');
-    return;
-  }
-
-  isPublishing = true;
-  const post = postQueue.shift();
+// ==========================================================
+// Funciones de Publicación Directa
+// ==========================================================
+async function executeFacebookPublish(post) {
   const pageId = process.env.PAGE_ID;
   const accessToken = process.env.PAGE_ACCESS_TOKEN;
 
   if (!pageId || !accessToken) {
-    console.error('\n[Sistema] Error: Credenciales de FB no configuradas en el .env');
-    postQueue.unshift(post);
-    isPublishing = false;
-    return;
+    throw new Error('Credenciales de FB no configuradas en el .env');
   }
 
-  try {
-    console.log(`\n[Sistema] Publicando ahora mismo en Facebook: "${post.message.substring(0, 30)}..."`);
-    const response = await axios.post(`https://graph.facebook.com/v19.0/${pageId}/feed`, {
-      message: post.message,
-      access_token: accessToken
+  if (post.imagePath && fs.existsSync(post.imagePath)) {
+    const form = new FormData();
+    form.append('access_token', accessToken);
+    if (post.message) form.append('message', post.message);
+    form.append('source', fs.createReadStream(post.imagePath));
+
+    const response = await axios.post(`https://graph.facebook.com/v19.0/${pageId}/photos`, form, {
+      headers: form.getHeaders()
     });
-    console.log(`[Sistema] ¡Exitoso! ID del post Facebook: ${response.data.id}`);
-  } catch (error) {
-    console.error('\n[Sistema] Error al publicar en FB:', error.response?.data || error.message);
-  }
-
-  if (postQueue.length > 0) {
-    console.log(`[Sistema] Quedan ${postQueue.length} mensajes pendientes.`);
-    console.log(`[Sistema] Esperando ${TIMER_MINUTES} minutos exactos para la siguiente publicación...`);
-    setTimeout(processQueue, TIMER_MINUTES * 60 * 1000);
+    return response.data;
   } else {
-    isPublishing = false;
-    console.log('\n[Sistema] Se completaron todas las publicaciones en cola. Sistema detenido y en reposo.');
+    const response = await axios.post(`https://graph.facebook.com/v19.0/${pageId}/feed`, {
+      message: post.message || '',
+      access_token: accessToken
+    });
+    return response.data;
   }
 }
 
-// Endpoint: Añadir mensaje a la cola (programar)
-app.post('/api/schedule', (req, res) => {
-  const { message } = req.body;
-  if (!message) return res.status(400).json({ error: 'Message is required' });
-  
-  postQueue.push({ id: Date.now(), message });
-  
-  // ¡Cambio Clave! Iniciamos el procesamiento instantáneamente si estaba detenido
-  if (!isPublishing) {
-    console.log('\n[Sistema] Nuevo mensaje detectado. Iniciando publicación.');
-    processQueue();
+async function executeWhatsAppPublish(post) {
+  const waToken = process.env.WHATSAPP_TOKEN;
+  const waPhoneId = process.env.WHATSAPP_PHONE_ID;
+
+  if (!waToken || !waPhoneId) {
+    throw new Error('Credenciales de WhatsApp no configuradas en el .env');
   }
+
+  if (!post.whatsappNumber) {
+    throw new Error('Número de WhatsApp de destino no proporcionado.');
+  }
+
+  const payload = {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: post.whatsappNumber,
+    type: "text",
+    text: {
+      preview_url: false,
+      body: post.message || ""
+    }
+  };
+
+  const response = await axios.post(`https://graph.facebook.com/v19.0/${waPhoneId}/messages`, payload, {
+    headers: {
+      'Authorization': `Bearer ${waToken}`,
+      'Content-Type': 'application/json'
+    }
+  });
+
+  return response.data;
+}
+
+// ==========================================
+// Endpoints de la API
+// ==========================================
+
+// Endpoint de diagnóstico para encontrar el PAGE_ID correcto
+app.get('/api/debug/pages', async (req, res) => {
+  const accessToken = process.env.PAGE_ACCESS_TOKEN;
+  if (!accessToken) return res.status(400).json({ error: 'Falta PAGE_ACCESS_TOKEN en el .env' });
   
-  res.status(200).json({ success: true, queueLength: postQueue.length, queuedMessage: message });
+  try {
+    const response = await axios.get(`https://graph.facebook.com/v19.0/me?fields=id,name&access_token=${accessToken}`);
+    res.json({
+      mensaje: "Copia este ID en tu archivo .env",
+      info: response.data
+    });
+  } catch (error) {
+    console.error('[Debug] Error al identificar cuenta:', error.response?.data || error.message);
+    res.status(500).json({ 
+      error: 'Error al consultar Meta Graph API', 
+      details: error.response?.data || error.message 
+    });
+  }
 });
 
-// Endpoint: Obtener todos los mensajes en la cola
-app.get('/api/queue', (req, res) => {
-  res.status(200).json({ queue: postQueue });
+// Endpoint de Publicación Directa e Inmediata
+app.post('/api/publish', upload.single('image'), async (req, res) => {
+  try {
+    const postObj = {
+      message: req.body.message,
+      imagePath: req.file ? req.file.path : null,
+      target: req.body.target || 'facebook',
+      whatsappNumber: req.body.whatsappNumber || null
+    };
+
+    let result = {};
+    if (postObj.target === 'facebook' || postObj.target === 'both') {
+      result.facebook = await executeFacebookPublish(postObj);
+    }
+    if (postObj.target === 'whatsapp' || postObj.target === 'both') {
+      result.whatsapp = await executeWhatsAppPublish(postObj);
+    }
+
+    res.status(200).json({ success: true, data: result });
+    
+    if (postObj.imagePath && fs.existsSync(postObj.imagePath)) {
+       fs.unlinkSync(postObj.imagePath);
+    }
+  } catch(e) {
+    console.error('[API Error] Error al publicar:', e.response?.data || e.message);
+    
+    // Intentar limpiar la imagen en caso de error
+    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+       try { fs.unlinkSync(req.file.path); } catch (err) {}
+    }
+
+    res.status(500).json({ 
+      error: 'Error al publicar en las plataformas', 
+      details: e.response?.data || e.message 
+    });
+  }
 });
 
-// Endpoint: Eliminar mensaje de la cola por ID
-app.delete('/api/queue/:id', (req, res) => {
-  const idToRemove = parseInt(req.params.id);
-  postQueue = postQueue.filter(post => post.id !== idToRemove);
-  res.status(200).json({ success: true, queue: postQueue });
+// Servir archivos estáticos del frontend en producción
+const frontendDist = path.join(__dirname, '..', 'frontend', 'dist');
+app.use(express.static(frontendDist));
+app.get('*', (req, res) => {
+  // Solo redirigir peticiones GET no-API al index.html de React
+  if (!req.path.startsWith('/api/')) {
+    const indexPath = path.join(frontendDist, 'index.html');
+    if (fs.existsSync(indexPath)) {
+      res.sendFile(indexPath);
+    } else {
+      res.status(404).send('Frontend no compilado. Por favor corre "npm run build".');
+    }
+  } else {
+    res.status(404).json({ error: 'Ruta API no encontrada' });
+  }
 });
 
 app.listen(PORT, () => {
   console.log(`Backend server running on http://localhost:${PORT}`);
-  console.log(`Sistema de Intervalo Dinámico activado (${TIMER_MINUTES} mins entre posts).`);
 });
+
