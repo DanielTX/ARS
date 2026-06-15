@@ -19,56 +19,9 @@ const upload = multer({ dest: 'uploads/' });
 app.use(cors());
 app.use(express.json());
 
-// Configuracion Global
-let globalAutoPublish = false;
-
-// Memoria simple para almacenar publicaciones programadas
-// Estructura: { id, message, approved }
-let postQueue = [];
-
-// ==========================================
-// Nuevos Endpoints de Configuración
-// ==========================================
-app.get('/api/settings', (req, res) => {
-  res.json({ autoPublish: globalAutoPublish });
-});
-
-app.post('/api/settings', (req, res) => {
-  const { autoPublish } = req.body;
-  globalAutoPublish = !!autoPublish;
-  
-  if (globalAutoPublish) {
-    if (postQueue.length > 0 && !queueTimer) {
-      startQueueTimer();
-    }
-  } else {
-    stopQueueTimer();
-  }
-  
-  res.json({ success: true, autoPublish: globalAutoPublish });
-});
-
-/* ==========================================================
- *  Sistema de Programación Inteligente (Intervalo dinámico)
- * ========================================================== */
-let isPublishing = false;
-let queueTimer = null;
-const TIMER_MINUTES = 10;
-
-function startQueueTimer() {
-  if (queueTimer) return;
-  console.log(`\n[Sistema] Temporizador iniciado. Próxima publicación en ${TIMER_MINUTES} minutos.`);
-  queueTimer = setTimeout(processQueue, TIMER_MINUTES * 60 * 1000);
-}
-
-function stopQueueTimer() {
-  if (queueTimer) {
-    console.log(`\n[Sistema] Temporizador detenido.`);
-    clearTimeout(queueTimer);
-    queueTimer = null;
-  }
-}
-
+// ==========================================================
+// Funciones de Publicación Directa
+// ==========================================================
 async function executeFacebookPublish(post) {
   const pageId = process.env.PAGE_ID;
   const accessToken = process.env.PAGE_ACCESS_TOKEN;
@@ -96,162 +49,119 @@ async function executeFacebookPublish(post) {
   }
 }
 
-async function processQueue() {
-  queueTimer = null; // El timer ya se ejecutó
+async function executeWhatsAppPublish(post) {
+  const waToken = process.env.WHATSAPP_TOKEN;
+  const waPhoneId = process.env.WHATSAPP_PHONE_ID;
 
-  if (!globalAutoPublish) {
-    console.log(`\n[Sistema] Auto-Publicar APAGADO. Mensajes acumularán en la cola.`);
-    return;
+  if (!waToken || !waPhoneId) {
+    throw new Error('Credenciales de WhatsApp no configuradas en el .env');
   }
 
-  if (postQueue.length === 0) {
-    console.log('\n[Sistema] Sistema procesador detenido (Cola vacía).');
-    return;
+  if (!post.whatsappNumber) {
+    throw new Error('Número de WhatsApp de destino no proporcionado.');
   }
 
-  isPublishing = true;
-  const post = postQueue.shift(); // Sacamos de la cola el elemento actual
-
-  try {
-    console.log(`\n[Sistema] Publicando ahora mismo en Facebook...`);
-    const data = await executeFacebookPublish(post);
-    console.log(`[Sistema] ¡Exitoso! ID del post Facebook: ${data.id}`);
-  } catch (error) {
-    console.error('\n[Sistema] Error al publicar en FB:', error.response?.data || error.message);
-  } finally {
-    if (post.imagePath && fs.existsSync(post.imagePath)) {
-      try { fs.unlinkSync(post.imagePath); } catch (e) { console.error('Error al limpiar upload:', e); }
+  const payload = {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: post.whatsappNumber,
+    type: "text",
+    text: {
+      preview_url: false,
+      body: post.message || ""
     }
-  }
+  };
 
-  isPublishing = false;
+  const response = await axios.post(`https://graph.facebook.com/v19.0/${waPhoneId}/messages`, payload, {
+    headers: {
+      'Authorization': `Bearer ${waToken}`,
+      'Content-Type': 'application/json'
+    }
+  });
 
-  if (postQueue.length > 0) {
-    console.log(`[Sistema] Quedan ${postQueue.length} mensajes pendientes.`);
-    startQueueTimer();
-  } else {
-    console.log('\n[Sistema] Se completaron todas las publicaciones en cola. Sistema en reposo.');
-  }
+  return response.data;
 }
 
 // ==========================================
-// Endpoints de Gestión de Cola
+// Endpoints de la API
 // ==========================================
 
-// Añadir mensaje a la cola (programar manual)
-app.post('/api/schedule', upload.single('image'), (req, res) => {
-  const { message } = req.body;
-  const imagePath = req.file ? req.file.path : null;
-  
-  if (!message && !imagePath) return res.status(400).json({ error: 'Message or image is required' });
-  
-  postQueue.push({ id: Date.now(), message: message || '', imagePath });
-  
-  // Iniciamos el procesamiento si estaba detenido
-  if (globalAutoPublish && !queueTimer) {
-    console.log('\n[Sistema] Nuevo mensaje detectado. Iniciando temporizador...');
-    startQueueTimer();
-  }
-  
-  res.status(200).json({ success: true, queueLength: postQueue.length, queuedMessage: message });
-});
-
-// Obtener todos los mensajes en la cola
-app.get('/api/queue', (req, res) => {
-  res.status(200).json({ queue: postQueue });
-});
-
-
-
-// Publicar mensaje AHORA MISMO y sacarlo de la cola
-app.post('/api/queue/:id/publish', async (req, res) => {
-  const idToPublish = parseInt(req.params.id);
-  const postIndex = postQueue.findIndex(p => p.id === idToPublish);
-  
-  if (postIndex === -1) return res.status(404).json({ error: 'Post no encontrado en la cola' });
-  
-  const post = postQueue[postIndex];
-  postQueue.splice(postIndex, 1); // Lo remueve
+// Endpoint de diagnóstico para encontrar el PAGE_ID correcto
+app.get('/api/debug/pages', async (req, res) => {
+  const accessToken = process.env.PAGE_ACCESS_TOKEN;
+  if (!accessToken) return res.status(400).json({ error: 'Falta PAGE_ACCESS_TOKEN en el .env' });
   
   try {
-    const data = await executeFacebookPublish(post);
-    res.status(200).json({ success: true, data });
+    const response = await axios.get(`https://graph.facebook.com/v19.0/me?fields=id,name&access_token=${accessToken}`);
+    res.json({
+      mensaje: "Copia este ID en tu archivo .env",
+      info: response.data
+    });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to publish immediately', details: error.response?.data || error.message });
-  } finally {
-    if (post.imagePath && fs.existsSync(post.imagePath)) {
-      try { fs.unlinkSync(post.imagePath); } catch (e) {}
-    }
+    console.error('[Debug] Error al identificar cuenta:', error.response?.data || error.message);
+    res.status(500).json({ 
+      error: 'Error al consultar Meta Graph API', 
+      details: error.response?.data || error.message 
+    });
   }
 });
 
-// Eliminar mensaje de la cola
-app.delete('/api/queue/:id', (req, res) => {
-  const idToRemove = parseInt(req.params.id);
-  const postToDelete = postQueue.find(post => post.id === idToRemove);
-  
-  if (postToDelete && postToDelete.imagePath && fs.existsSync(postToDelete.imagePath)) {
-    try { fs.unlinkSync(postToDelete.imagePath); } catch (e) {}
-  }
-  
-  postQueue = postQueue.filter(post => post.id !== idToRemove);
-  res.status(200).json({ success: true, queue: postQueue });
-});
-
-// Endpoint temporal para probar sin frontend (opcional)
+// Endpoint de Publicación Directa e Inmediata
 app.post('/api/publish', upload.single('image'), async (req, res) => {
   try {
     const postObj = {
       message: req.body.message,
-      imagePath: req.file ? req.file.path : null
+      imagePath: req.file ? req.file.path : null,
+      target: req.body.target || 'facebook',
+      whatsappNumber: req.body.whatsappNumber || null
     };
-    const data = await executeFacebookPublish(postObj);
-    res.status(200).json({ success: true, data });
+
+    let result = {};
+    if (postObj.target === 'facebook' || postObj.target === 'both') {
+      result.facebook = await executeFacebookPublish(postObj);
+    }
+    if (postObj.target === 'whatsapp' || postObj.target === 'both') {
+      result.whatsapp = await executeWhatsAppPublish(postObj);
+    }
+
+    res.status(200).json({ success: true, data: result });
     
     if (postObj.imagePath && fs.existsSync(postObj.imagePath)) {
        fs.unlinkSync(postObj.imagePath);
     }
   } catch(e) {
-    res.status(500).json({ error: e.message });
+    console.error('[API Error] Error al publicar:', e.response?.data || e.message);
+    
+    // Intentar limpiar la imagen en caso de error
+    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+       try { fs.unlinkSync(req.file.path); } catch (err) {}
+    }
+
+    res.status(500).json({ 
+      error: 'Error al publicar en las plataformas', 
+      details: e.response?.data || e.message 
+    });
+  }
+});
+
+// Servir archivos estáticos del frontend en producción
+const frontendDist = path.join(__dirname, '..', 'frontend', 'dist');
+app.use(express.static(frontendDist));
+app.get('*', (req, res) => {
+  // Solo redirigir peticiones GET no-API al index.html de React
+  if (!req.path.startsWith('/api/')) {
+    const indexPath = path.join(frontendDist, 'index.html');
+    if (fs.existsSync(indexPath)) {
+      res.sendFile(indexPath);
+    } else {
+      res.status(404).send('Frontend no compilado. Por favor corre "npm run build".');
+    }
+  } else {
+    res.status(404).json({ error: 'Ruta API no encontrada' });
   }
 });
 
 app.listen(PORT, () => {
   console.log(`Backend server running on http://localhost:${PORT}`);
-  console.log(`Sistema de Intervalo Dinámico activado (${TIMER_MINUTES} mins entre posts).`);
-  startTestGenerator();
 });
 
-/* ==========================================================
- *  Generador Autónomo de Pruebas
- * ========================================================== */
-let holaCounter = 1;
-const holaWords = ["Primer", "Segundo", "Tercer", "Cuarto", "Quinto", "Sexto", "Séptimo", "Octavo", "Noveno", "Décimo"];
-let testGeneratorInterval;
-
-function startTestGenerator() {
-  console.log('[Test Generator] Iniciando generador de saludos automatizado (cada 10 min, max 10)...');
-  
-  // Función interna que se ejecuta cada ciclo
-  function fireTestPost() {
-    if (holaCounter > 10) {
-      console.log('[Test Generator] Se llegó al límite de 10 saludos. Apagando generador.');
-      clearInterval(testGeneratorInterval);
-      return;
-    }
-    
-    const message = `${holaWords[holaCounter - 1]} hola`;
-    postQueue.push({ id: Date.now(), message });
-    console.log(`\n[Test Generator] Se inyectó generador de texto: "${message}"`);
-    holaCounter++;
-    
-    if (globalAutoPublish && !queueTimer) {
-      startQueueTimer();
-    }
-  }
-
-  // Comentar la siguiente linea si NO quieres que dispare el primero inmediatamente al iniciar:
-  fireTestPost(); // Dispara el 1ro apenas arranca
-
-  testGeneratorInterval = setInterval(fireTestPost, TIMER_MINUTES * 60 * 1000);
-}
