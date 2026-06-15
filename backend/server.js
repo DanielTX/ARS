@@ -161,8 +161,11 @@ app.get('*', (req, res) => {
     res.status(404).json({ error: 'Ruta API no encontrada' });
   }
 });
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Backend server running on http://localhost:${PORT}`);
+  });
+}
 
-app.listen(PORT, () => {
-  console.log(`Backend server running on http://localhost:${PORT}`);
-});
+module.exports = app;
 
