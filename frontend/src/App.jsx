@@ -354,6 +354,16 @@ function App() {
             </div>
           </div>
         )}
+
+        {/* Footer */}
+        <footer className="main-footer">
+          <div className="footer-links">
+            <a href="/terms">Términos de Servicio</a>
+            <span className="footer-divider">·</span>
+            <a href="/privacy">Política de Privacidad</a>
+          </div>
+          <p>© 2026 Autopost System. Todos los derechos reservados.</p>
+        </footer>
       </main>
     </div>
   );
