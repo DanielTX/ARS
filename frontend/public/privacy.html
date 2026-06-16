@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Política de Privacidad - Autopost System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: #0f172a;
+            color: #f1f5f9;
+        }
+    </style>
+</head>
+<body class="min-h-screen py-12 px-4 sm:px-6 lg:px-8">
+    <div class="max-w-3xl mx-auto bg-slate-900 rounded-2xl shadow-xl border border-slate-800 p-8 sm:p-12">
+        <h1 class="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-violet-500 mb-8">
+            Política de Privacidad
+        </h1>
+        <p class="text-slate-400 mb-6 text-sm">Última actualización: 16 de junio de 2026</p>
+
+        <section class="space-y-6">
+            <div>
+                <h2 class="text-xl font-semibold text-slate-200 mb-2">1. Información que Recopilamos</h2>
+                <p class="text-slate-300 leading-relaxed">
+                    Para ofrecer el servicio de automatización, Autopost System almacena localmente y en las variables de entorno de su despliegue los tokens de acceso provistos por Facebook, WhatsApp y TikTok. No transferimos ni vendemos esta información a terceros.
+                </p>
+            </div>
+
+            <div>
+                <h2 class="text-xl font-semibold text-slate-200 mb-2">2. Uso de la Información</h2>
+                <p class="text-slate-300 leading-relaxed">
+                    Los tokens y las credenciales recopiladas se utilizan únicamente para autenticar y autorizar las publicaciones en su nombre en las plataformas correspondientes.
+                </p>
+            </div>
+
+            <div>
+                <h2 class="text-xl font-semibold text-slate-200 mb-2">3. Seguridad de los Datos</h2>
+                <p class="text-slate-300 leading-relaxed">
+                    Implementamos medidas de seguridad técnicas y organizativas para proteger sus datos personales y tokens contra el acceso no autorizado, alteración, divulgación o destrucción. Las credenciales se manejan de forma segura a través de variables de entorno de Vercel.
+                </p>
+            </div>
+
+            <div>
+                <h2 class="text-xl font-semibold text-slate-200 mb-2">4. Control del Usuario</h2>
+                <p class="text-slate-300 leading-relaxed">
+                    Usted puede revocar el acceso de Autopost System a sus cuentas de redes sociales en cualquier momento eliminando los tokens configurados en las variables de entorno o revocando los permisos directamente desde los paneles de seguridad de Meta o TikTok.
+                </p>
+            </div>
+        </section>
+
+        <div class="mt-12 pt-8 border-t border-slate-800 text-center">
+            <a href="/" class="text-pink-500 hover:text-pink-400 font-semibold transition-colors duration-200">
+                Volver al Inicio
+            </a>
+        </div>
+    </div>
+</body>
+</html>
