@@ -416,3 +416,34 @@ h1.beta-title span { background: linear-gradient(135deg, var(--accent), var(--ac
   visibility: visible;
   opacity: 1;
 }
+
+/* Footer styles */
+footer.main-footer {
+  margin-top: 60px;
+  padding-top: 32px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted);
+  animation: fadeUp .7s .4s ease both;
+}
+footer.main-footer .footer-links {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+footer.main-footer .footer-links a {
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 500;
+  transition: color .2s;
+}
+footer.main-footer .footer-links a:hover {
+  color: var(--accent);
+}
+footer.main-footer .footer-divider {
+  color: var(--border);
+}
+
