@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
+import LoginPage from './LoginPage';
 
 function App() {
   const [message, setMessage] = useState('');
@@ -11,6 +12,39 @@ function App() {
   const [status, setStatus] = useState({ type: '', text: '' });
   const [loading, setLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+
+  // Auth state
+  const [token, setToken] = useState(() => localStorage.getItem('ap_token') || null);
+  const [authChecked, setAuthChecked] = useState(false);
+
+  useEffect(() => {
+    const storedToken = localStorage.getItem('ap_token');
+    if (!storedToken) {
+      setToken(null);
+      setAuthChecked(true);
+      return;
+    }
+    // Verify token is still valid with the backend
+    axios.get('/api/auth/verify', {
+      headers: { Authorization: `Bearer ${storedToken}` }
+    }).then(() => {
+      setToken(storedToken);
+    }).catch(() => {
+      localStorage.removeItem('ap_token');
+      setToken(null);
+    }).finally(() => {
+      setAuthChecked(true);
+    });
+  }, []);
+
+  const handleLogin = (newToken) => {
+    setToken(newToken);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('ap_token');
+    setToken(null);
+  };
 
   const handleAction = async () => {
     const activePlats = Object.keys(platforms).filter(k => platforms[k]);
@@ -52,7 +86,10 @@ function App() {
         formData.append('target', 'facebook');
 
         promises.push(axios.post('/api/publish', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' }
+          headers: { 
+            'Content-Type': 'multipart/form-data',
+            'Authorization': `Bearer ${token}`
+          }
         }));
       }
 
@@ -66,7 +103,10 @@ function App() {
           formData.append('whatsappNumber', num);
 
           promises.push(axios.post('/api/publish', formData, {
-            headers: { 'Content-Type': 'multipart/form-data' }
+            headers: { 
+              'Content-Type': 'multipart/form-data',
+              'Authorization': `Bearer ${token}`
+            }
           }));
         }
       }
@@ -123,10 +163,34 @@ function App() {
     return active.length ? `Publicar en ${active.join(', ')}` : 'Selecciona al menos una plataforma';
   };
 
+  // Loading state while verifying token
+  if (!authChecked) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div className="spinner show" style={{ width: '32px', height: '32px', borderWidth: '3px' }} />
+      </div>
+    );
+  }
+
+  // Show login if not authenticated
+  if (!token) {
+    return <LoginPage onLogin={handleLogin} />;
+  }
+
   return (
     <div>
-      <div className="blob blob1"></div>
-      <div className="blob blob2"></div>
+      <div className="blob blob1" />
+      <div className="blob blob2" />
+
+      {/* Logout button */}
+      <button className="logout-btn" onClick={handleLogout} title="Cerrar sesión">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+          <polyline points="16 17 21 12 16 7"/>
+          <line x1="21" y1="12" x2="9" y2="12"/>
+        </svg>
+        Salir
+      </button>
 
       <main>
         <header>

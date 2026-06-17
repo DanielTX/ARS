@@ -5,6 +5,7 @@ const multer = require('multer');
 const FormData = require('form-data');
 const fs = require('fs');
 const path = require('path');
+const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
 const app = express();
@@ -84,8 +85,55 @@ async function executeWhatsAppPublish(post) {
 }
 
 // ==========================================
+// Middleware de Autenticación
+// ==========================================
+function requireAuth(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1]; // Bearer <token>
+  if (!token) {
+    return res.status(401).json({ error: 'Acceso denegado. Se requiere token de autenticación.' });
+  }
+  try {
+    const secret = process.env.JWT_SECRET || 'fallback_secret';
+    const decoded = jwt.verify(token, secret);
+    req.user = decoded;
+    next();
+  } catch (err) {
+    return res.status(403).json({ error: 'Token inválido o expirado. Inicia sesión nuevamente.' });
+  }
+}
+
+// ==========================================
 // Endpoints de la API
 // ==========================================
+
+// Endpoint de Login
+app.post('/api/auth/login', (req, res) => {
+  const { username, password } = req.body;
+  const validUser = process.env.APP_USERNAME;
+  const validPass = process.env.APP_PASSWORD;
+  const secret = process.env.JWT_SECRET || 'fallback_secret';
+
+  if (!validUser || !validPass) {
+    return res.status(500).json({ error: 'Credenciales de app no configuradas en el servidor.' });
+  }
+
+  if (username === validUser && password === validPass) {
+    const token = jwt.sign(
+      { username, loginAt: new Date().toISOString() },
+      secret,
+      { expiresIn: '7d' }
+    );
+    return res.json({ success: true, token });
+  }
+
+  return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
+});
+
+// Endpoint para verificar token (usado por el frontend al recargar)
+app.get('/api/auth/verify', requireAuth, (req, res) => {
+  res.json({ valid: true, user: req.user.username });
+});
 
 // Endpoint de diagnóstico para encontrar el PAGE_ID correcto
 app.get('/api/debug/pages', async (req, res) => {
@@ -108,7 +156,7 @@ app.get('/api/debug/pages', async (req, res) => {
 });
 
 // Endpoint de Publicación Directa e Inmediata
-app.post('/api/publish', upload.single('image'), async (req, res) => {
+app.post('/api/publish', requireAuth, upload.single('image'), async (req, res) => {
   try {
     const postObj = {
       message: req.body.message,
