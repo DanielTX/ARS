@@ -193,6 +193,229 @@ app.post('/api/publish', requireAuth, upload.single('image'), async (req, res) =
   }
 });
 
+// ==========================================================
+// WhatsApp Cloud API - Webhooks & Mensajería Multimoderador
+// ==========================================================
+
+const waChatsFile = process.env.VERCEL 
+  ? path.join(os.tmpdir(), 'whatsapp_chats.json')
+  : path.join(__dirname, 'whatsapp_chats.json');
+
+function getStoredChats() {
+  try {
+    if (fs.existsSync(waChatsFile)) {
+      return JSON.parse(fs.readFileSync(waChatsFile, 'utf8'));
+    }
+  } catch (err) {
+    console.error('[WhatsApp DB] Error leyendo historial:', err.message);
+  }
+  return {};
+}
+
+function saveStoredChats(data) {
+  try {
+    fs.writeFileSync(waChatsFile, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[WhatsApp DB] Error guardando historial:', err.message);
+  }
+}
+
+// 1. Verificación del Webhook (GET) - Requerido por Meta
+app.get('/api/whatsapp/webhook', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN || 'autopost_crm_webhook_2026';
+
+  console.log('[Meta Webhook GET] Petición de validación recibida:', { mode, token, challenge });
+
+  if (mode && token) {
+    if (mode === 'subscribe' && token === verifyToken) {
+      console.log('[Meta Webhook GET] ¡Webhook verificado con éxito!');
+      return res.status(200).send(challenge);
+    } else {
+      console.warn('[Meta Webhook GET] Token de verificación no coincide.');
+      return res.sendStatus(403);
+    }
+  }
+
+  res.sendStatus(400);
+});
+
+// 2. Recepción de mensajes en tiempo real (POST) - Enviado por Meta
+app.post('/api/whatsapp/webhook', (req, res) => {
+  const body = req.body;
+
+  // Responder a Meta INMEDIATAMENTE con 200 OK para evitar reintentos y bloqueos
+  res.status(200).send('EVENT_RECEIVED');
+
+  try {
+    if (body.object === 'whatsapp_business_account') {
+      const entries = body.entry || [];
+      for (const entry of entries) {
+        const changes = entry.changes || [];
+        for (const change of changes) {
+          if (change.field === 'messages') {
+            const val = change.value;
+            const contacts = val.contacts || [];
+            const messages = val.messages || [];
+
+            for (const msg of messages) {
+              const from = msg.from; // Número del cliente
+              const contactInfo = contacts.find(c => c.wa_id === from);
+              const contactName = contactInfo?.profile?.name || `+${from}`;
+
+              let text = '';
+              if (msg.type === 'text') {
+                text = msg.text?.body || '';
+              } else if (msg.type === 'image') {
+                text = '📷 Imagen recibida';
+              } else if (msg.type === 'document') {
+                text = `📄 ${msg.document?.filename || 'Documento recibido'}`;
+              } else if (msg.type === 'audio') {
+                text = '🎤 Nota de voz';
+              } else {
+                text = `[Mensaje tipo: ${msg.type}]`;
+              }
+
+              const timeStr = new Date(parseInt(msg.timestamp) * 1000 || Date.now())
+                .toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+              console.log(`[WhatsApp Entrada] De ${contactName} (${from}): ${text}`);
+
+              const chats = getStoredChats();
+              if (!chats[from]) {
+                const initials = contactName.split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase() || 'WA';
+                chats[from] = {
+                  id: from,
+                  numero: `+${from}`,
+                  nombre: contactName,
+                  initials,
+                  unread: 0,
+                  archivado: false,
+                  fijado: false,
+                  silenciado: false,
+                  cerrado: false,
+                  vendedores: [],
+                  tags: ['Nuevo lead'],
+                  messages: []
+                };
+              }
+
+              chats[from].unread = (chats[from].unread || 0) + 1;
+              chats[from].preview = text;
+              chats[from].fecha = 'Hoy';
+              chats[from].messages.push({
+                id: msg.id || Date.now(),
+                from: 'contact',
+                text,
+                time: timeStr
+              });
+
+              saveStoredChats(chats);
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[Meta Webhook POST] Error procesando payload:', err.message);
+  }
+});
+
+// 3. Obtener chats y mensajes sincronizados para el CRM
+app.get('/api/whatsapp/chats', requireAuth, (req, res) => {
+  try {
+    const chats = getStoredChats();
+    res.json({ success: true, chats: Object.values(chats) });
+  } catch (err) {
+    res.status(500).json({ error: 'Error obteniendo chats', details: err.message });
+  }
+});
+
+// 4. Enviar mensaje desde el CRM hacia Meta WhatsApp Cloud API
+app.post('/api/whatsapp/send', requireAuth, async (req, res) => {
+  const { to, message, vendedor, nombre } = req.body;
+  const waToken = process.env.WHATSAPP_TOKEN;
+  const waPhoneId = process.env.WHATSAPP_PHONE_ID;
+
+  if (!to || !message) {
+    return res.status(400).json({ error: 'Faltan campos requeridos: to y message' });
+  }
+
+  if (!waToken || !waPhoneId) {
+    return res.status(500).json({ error: 'Credenciales de WhatsApp (WHATSAPP_TOKEN, WHATSAPP_PHONE_ID) no configuradas.' });
+  }
+
+  try {
+    const cleanNumber = to.replace(/\D/g, '');
+
+    const payload = {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: cleanNumber,
+      type: "text",
+      text: {
+        preview_url: false,
+        body: message
+      }
+    };
+
+    const response = await axios.post(`https://graph.facebook.com/v21.0/${waPhoneId}/messages`, payload, {
+      headers: {
+        'Authorization': `Bearer ${waToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    // Guardar en el historial
+    const chats = getStoredChats();
+    if (!chats[cleanNumber]) {
+      const initials = (nombre || cleanNumber).split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase() || 'WA';
+      chats[cleanNumber] = {
+        id: cleanNumber,
+        numero: `+${cleanNumber}`,
+        nombre: nombre || `+${cleanNumber}`,
+        initials,
+        unread: 0,
+        archivado: false,
+        fijado: false,
+        silenciado: false,
+        cerrado: false,
+        vendedores: [],
+        tags: ['Cliente activo'],
+        messages: []
+      };
+    }
+
+    if (vendedor && !chats[cleanNumber].vendedores.includes(vendedor)) {
+      chats[cleanNumber].vendedores.push(vendedor);
+    }
+
+    chats[cleanNumber].preview = message;
+    chats[cleanNumber].fecha = 'Hoy';
+    chats[cleanNumber].messages.push({
+      id: response.data.messages?.[0]?.id || Date.now(),
+      from: 'me',
+      text: message,
+      time: timeStr,
+      vendedor: vendedor || 'Daniel'
+    });
+
+    saveStoredChats(chats);
+
+    res.json({ success: true, data: response.data });
+  } catch (error) {
+    console.error('[WhatsApp Send Error]:', error.response?.data || error.message);
+    res.status(500).json({
+      error: 'Error enviando mensaje vía WhatsApp Cloud API',
+      details: error.response?.data || error.message
+    });
+  }
+});
+
 // Servir archivos estáticos del frontend en producción
 const frontendDist = path.join(__dirname, '..', 'frontend', 'dist');
 app.use(express.static(frontendDist));
