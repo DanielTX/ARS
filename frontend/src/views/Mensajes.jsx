@@ -65,189 +65,23 @@ const PLANTILLAS_WHATSAPP = [
   }
 ];
 
-// Conversaciones mock con soporte multivendedor, fijado, silenciado y tags
-const CONVERSACIONES_INICIALES = [
-  {
-    id: 1,
-    initials: 'MZ',
-    nombre: 'Mauro Zanetti',
-    numero: '+1 3025550183',
-    fecha: '28/09/26',
-    unread: 0,
-    archivado: false,
-    fijado: false,
-    silenciado: false,
-    cerrado: false,
-    vendedores: ['Marcos Ferreyra'],
-    tags: ['Caliente'],
-    messages: [
-      { id: 1, from: 'contact', text: 'Hola, quería consultar sobre los servicios de distribución y cotización de flete.', time: '10:14' },
-      { id: 2, from: 'me', text: '¡Hola Mauro! Con gusto. Te adjunto los paquetes disponibles para tu empresa.', time: '10:18', vendedor: 'Marcos Ferreyra' },
-    ]
-  },
-  {
-    id: 2,
-    initials: 'TL',
-    nombre: 'Tomás López',
-    numero: '+1 333-333-0342',
-    fecha: '20/06/26',
-    unread: 2,
-    archivado: false,
-    fijado: true, // Fijado por defecto
-    silenciado: false,
-    cerrado: false,
-    vendedores: ['Laura Giménez', 'Marcos Ferreyra'],
-    tags: ['Soporte', 'Cotizando'],
-    messages: [
-      { id: 1, from: 'contact', text: '¡Llegó con un palet dañado 😢', time: '17:51' },
-      { id: 2, from: 'me', text: 'Hola Tomás, lamentamos el inconveniente. Déjame revisar con el equipo de bodega de inmediato.', time: '18:24', vendedor: 'Laura Giménez' },
-      { id: 3, from: 'contact', text: '¿Cómo lo resolvemos?', time: '19:06' },
-      { id: 4, from: 'me', text: 'Acabo de generar la orden de reemplazo urgente prioritaria para mañana mismo.', time: '19:15', vendedor: 'Marcos Ferreyra' }
-    ]
-  },
-  {
-    id: 3,
-    initials: 'RL',
-    nombre: 'Ramiro López',
-    numero: '+1 333-333-0342',
-    fecha: '20/06/26',
-    unread: 0,
-    archivado: false,
-    fijado: false,
-    silenciado: false,
-    cerrado: false,
-    vendedores: ['Laura Giménez', 'Sofía Navarro'],
-    tags: ['Nuevo lead'],
-    messages: [
-      { id: 1, from: 'contact', text: 'Lo necesito para la semana que viene', time: '14:20' },
-      { id: 2, from: 'me', text: 'Perfecto Ramiro, coordinamos la entrega para el día martes sin falta.', time: '14:35', vendedor: 'Laura Giménez' }
-    ]
-  },
-  {
-    id: 4,
-    initials: 'BM',
-    nombre: 'Benjamín Molina',
-    numero: '+1 333-333-0342',
-    fecha: '18/06/26',
-    unread: 0,
-    archivado: false,
-    fijado: false,
-    silenciado: true,
-    cerrado: false,
-    vendedores: ['Sofía Navarro'],
-    tags: ['Cliente activo'],
-    messages: [
-      { id: 1, from: 'contact', text: '¡Avisa! Cuando eso estamos por acordar las nuevas tarifas anuales.', time: '11:05' },
-      { id: 2, from: 'me', text: 'Listo Benjamín, te confirmo los números en 30 minutos.', time: '11:20', vendedor: 'Sofía Navarro' }
-    ]
-  },
-  {
-    id: 5,
-    initials: 'ER',
-    nombre: 'Emilio Ramos',
-    numero: '+1 847-554-3545',
-    fecha: '17/06/26',
-    unread: 1,
-    archivado: false,
-    fijado: false,
-    silenciado: false,
-    cerrado: false,
-    vendedores: ['Marcos Ferreyra'],
-    tags: ['Caliente'],
-    messages: [
-      { id: 1, from: 'contact', text: 'Lista, agenda a las 13hs 🗓', time: '09:40' }
-    ]
-  },
-  {
-    id: 6,
-    initials: 'TC',
-    nombre: 'Tomás Castro',
-    numero: '+1 847-554-3545',
-    fecha: '16/06/26',
-    unread: 0,
-    archivado: false,
-    fijado: false,
-    silenciado: false,
-    cerrado: false,
-    vendedores: ['Marcos Ferreyra', 'Sofía Navarro'],
-    tags: ['Cotizando'],
-    messages: [
-      { id: 1, from: 'contact', text: 'También 100 unidades, qué sane en 2hs. Te parece?', time: '16:02' }
-    ]
-  },
-  {
-    id: 7,
-    initials: 'RR',
-    nombre: 'Renata Ruiz',
-    numero: '+1 262-333-2012',
-    fecha: '16/06/26',
-    unread: 0,
-    archivado: false,
-    fijado: false,
-    silenciado: false,
-    cerrado: false,
-    vendedores: ['Laura Giménez'],
-    tags: ['Seguimiento'],
-    messages: [
-      { id: 1, from: 'contact', text: 'Genial. Sí, estamos disponibles. Gracias!', time: '18:15' }
-    ]
-  },
-  {
-    id: 8,
-    initials: 'MG',
-    nombre: 'Mateo Gómez',
-    numero: '+1 202-255-0142',
-    fecha: '15/06/26',
-    unread: 0,
-    archivado: false,
-    fijado: false,
-    silenciado: false,
-    cerrado: false,
-    vendedores: ['Laura Giménez'],
-    tags: ['Seguimiento'],
-    messages: []
-  },
-  {
-    id: 9,
-    initials: 'AD',
-    nombre: 'Ana Delgado',
-    numero: '+1 415-555-0199',
-    fecha: '10/06/26',
-    unread: 3,
-    archivado: false,
-    fijado: false,
-    silenciado: false,
-    cerrado: false,
-    vendedores: [],
-    tags: ['Nuevo lead'],
-    messages: [
-      { id: 1, from: 'contact', text: 'Hola, vi sus publicaciones y requiero cotización para 50 toneladas.', time: '15:30' }
-    ]
-  },
-  {
-    id: 10,
-    initials: 'CV',
-    nombre: 'Carlos Vega',
-    numero: '+1 503-555-0177',
-    fecha: '02/06/26',
-    unread: 0,
-    archivado: true,
-    fijado: false,
-    silenciado: false,
-    cerrado: false,
-    vendedores: ['Marcos Ferreyra'],
-    tags: ['Cliente activo'],
-    messages: [
-      { id: 1, from: 'contact', text: 'Muchas gracias por la atención brindada, trato cerrado exitosamente.', time: '11:15' }
-    ]
+// Conversaciones de WhatsApp reales (sin datos ficticios)
+const CONVERSACIONES_INICIALES = [];
+
+function getAvatarColor(id) {
+  const str = String(id || 'WA');
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
   }
-];
+  return `hsl(${Math.abs(hash) % 360}, 60%, 35%)`;
+}
 
 export default function Mensajes() {
   const [conversaciones, setConversaciones] = useState(CONVERSACIONES_INICIALES);
   const [etiquetas, setEtiquetas] = useState(ETIQUETAS_INICIALES);
   const [plantillas, setPlantillas] = useState(PLANTILLAS_WHATSAPP);
-  const [selectedId, setSelectedId] = useState(2);
+  const [selectedId, setSelectedId] = useState(null);
 
   // Estados de filtros
   const [tab, setTab] = useState('todos');
@@ -310,32 +144,39 @@ export default function Mensajes() {
       axios.get('/api/whatsapp/chats', {
         headers: { Authorization: `Bearer ${token}` }
       }).then(res => {
-        if (res.data?.success && Array.isArray(res.data.chats) && res.data.chats.length > 0) {
+        if (res.data?.success && Array.isArray(res.data.chats)) {
+          const incomingChats = res.data.chats;
           setConversaciones(prev => {
-            const map = new Map(prev.map(c => [String(c.id), c]));
-            res.data.chats.forEach(incoming => {
-              const key = String(incoming.id || incoming.numero);
-              const existing = map.get(key);
-              if (existing) {
-                map.set(key, {
-                  ...existing,
-                  ...incoming,
-                  tags: incoming.tags?.length ? incoming.tags : existing.tags,
-                  vendedores: incoming.vendedores?.length ? incoming.vendedores : existing.vendedores,
-                  messages: incoming.messages || existing.messages
-                });
-              } else {
-                map.set(key, incoming);
+            const prevMap = new Map(prev.map(c => [String(c.id), c]));
+            return incomingChats.map(inc => {
+              const key = String(inc.id || inc.numero);
+              const p = prevMap.get(key);
+              if (p) {
+                return {
+                  ...inc,
+                  fijado: p.fijado !== undefined ? p.fijado : inc.fijado,
+                  archivado: p.archivado !== undefined ? p.archivado : inc.archivado,
+                  silenciado: p.silenciado !== undefined ? p.silenciado : inc.silenciado,
+                  cerrado: p.cerrado !== undefined ? p.cerrado : inc.cerrado,
+                  tags: p.tags?.length ? p.tags : (inc.tags || ['Nuevo lead']),
+                  vendedores: p.vendedores?.length ? p.vendedores : (inc.vendedores || [])
+                };
               }
+              return inc;
             });
-            return Array.from(map.values());
+          });
+
+          setSelectedId(prev => {
+            if (!prev && incomingChats.length > 0) return incomingChats[0].id;
+            if (prev && !incomingChats.some(c => c.id === prev) && incomingChats.length > 0) return incomingChats[0].id;
+            return prev;
           });
         }
       }).catch(() => {});
     };
 
     syncChats();
-    const timer = setInterval(syncChats, 6000);
+    const timer = setInterval(syncChats, 3000);
     return () => clearInterval(timer);
   }, []);
 
@@ -859,7 +700,7 @@ export default function Mensajes() {
                   }}
                 >
                   {/* Avatar de contacto */}
-                  <div className="conv-avatar" style={{ background: `hsl(${c.id * 55}, 60%, 35%)`, position: 'relative' }}>
+                  <div className="conv-avatar" style={{ background: getAvatarColor(c.id), position: 'relative' }}>
                     {c.initials}
                     {c.fijado && (
                       <span style={{ position: 'absolute', bottom: '-2px', right: '-2px', fontSize: '10px' }} title="Fijado">
@@ -940,7 +781,7 @@ export default function Mensajes() {
             {/* Header del chat */}
             <div className="chat-header">
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <div className="conv-avatar" style={{ width: '40px', height: '40px', fontSize: '14px', background: `hsl(${activeChat.id * 55}, 60%, 35%)`, position: 'relative' }}>
+                <div className="conv-avatar" style={{ width: '40px', height: '40px', fontSize: '14px', background: getAvatarColor(activeChat.id), position: 'relative' }}>
                   {activeChat.initials}
                   {activeChat.fijado && <span style={{ position: 'absolute', bottom: '-2px', right: '-2px', fontSize: '10px' }}>📌</span>}
                 </div>
