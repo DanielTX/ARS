@@ -89,7 +89,13 @@ export default function Mensajes() {
   const [conversaciones, setConversaciones] = useState(CONVERSACIONES_INICIALES);
   const [etiquetas, setEtiquetas] = useState(ETIQUETAS_INICIALES);
   const [plantillas, setPlantillas] = useState(PLANTILLAS_WHATSAPP);
-  const [selectedId, setSelectedId] = useState(null);
+  const [selectedId, setSelectedId] = useState(() => {
+    try {
+      return localStorage.getItem('ap_selected_chat') || null;
+    } catch {
+      return null;
+    }
+  });
   const selectedIdRef = useRef(selectedId);
 
   useEffect(() => {
@@ -125,12 +131,21 @@ export default function Mensajes() {
   // Input de chat, Emojis y Adjuntos
   const [inputText, setInputText] = useState('');
   const messagesEndRef = useRef(null);
+  const chatMessagesContainerRef = useRef(null);
   const chatInputRef = useRef(null);
   const emojiPickerRef = useRef(null);
   const fileInputRef = useRef(null);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null); // { file, name, size, type, previewUrl }
   const [isUploading, setIsUploading] = useState(false);
+
+  const scrollToBottom = (behavior = 'auto') => {
+    if (chatMessagesContainerRef.current) {
+      chatMessagesContainerRef.current.scrollTop = chatMessagesContainerRef.current.scrollHeight;
+    } else if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior });
+    }
+  };
 
   const dropdownRefVendedor = useRef(null);
   const dropdownRefEtiquetas = useRef(null);
@@ -182,6 +197,9 @@ export default function Mensajes() {
   // Seleccionar un chat y marcarlo como leído inmediatamente
   const handleSelectChat = (chatId) => {
     setSelectedId(chatId);
+    try {
+      localStorage.setItem('ap_selected_chat', String(chatId));
+    } catch {}
     markAsRead(chatId);
   };
 
@@ -207,12 +225,18 @@ export default function Mensajes() {
           }));
 
           setSelectedId(prev => {
-            if (!prev && incomingChats.length > 0) {
+            const savedChat = localStorage.getItem('ap_selected_chat');
+            const target = prev || savedChat;
+            const found = incomingChats.find(c => String(c.id) === String(target));
+            if (found) {
+              return found.id;
+            }
+            if (incomingChats.length > 0) {
               const firstId = incomingChats[0].id;
               markAsRead(firstId);
               return firstId;
             }
-            return prev;
+            return null;
           });
         }
       }).catch(() => {});
@@ -224,6 +248,17 @@ export default function Mensajes() {
   }, []);
 
   const activeChat = conversaciones.find(c => c.id === selectedId) || null;
+
+  // Mantener el scroll en el último mensaje enviado/recibido al recargar o cambiar de chat
+  useEffect(() => {
+    if (activeChat?.messages && activeChat.messages.length > 0) {
+      scrollToBottom('auto');
+      const timer = setTimeout(() => {
+        scrollToBottom('auto');
+      }, 60);
+      return () => clearTimeout(timer);
+    }
+  }, [selectedId, activeChat?.messages?.length]);
 
   const tagColorMap = etiquetas.reduce((acc, t) => {
     acc[t.nombre] = t.color;
@@ -349,7 +384,7 @@ export default function Mensajes() {
     const newMsg = {
       id: Date.now(),
       from: 'me',
-      text: previewMsgText,
+      text: textToSend, // Solo el comentario/texto del usuario (vacío si solo adjuntó archivo)
       time: timeStr,
       vendedor: currentVendedor,
       mediaType,
@@ -945,7 +980,7 @@ export default function Mensajes() {
                 </div>
               </div>
 
-              {/* Botones de acción del header: 1º LUPA, 2º TRES PUNTOS, 3º EXPANDIR */}
+              {/* Botones de acción del header: 1º LUPA, 2º TRES PUNTOS */}
               <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                 {/* 1. Lupa (Buscar en conversación) */}
                 <button
@@ -1125,13 +1160,6 @@ export default function Mensajes() {
                     </div>
                   )}
                 </div>
-
-                {/* 3. Pantalla completa / maximizar */}
-                <button className="topbar-icon-btn" title="Pantalla completa">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
-                  </svg>
-                </button>
               </div>
             </div>
 
@@ -1154,7 +1182,7 @@ export default function Mensajes() {
             )}
 
             {/* Mensajes del chat */}
-            <div className="chat-messages">
+            <div className="chat-messages" ref={chatMessagesContainerRef}>
               {displayMessages.length === 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--muted)', textAlign: 'center' }}>
                   <div style={{ padding: '8px 16px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '100px', fontSize: '13px' }}>
@@ -1190,6 +1218,7 @@ export default function Mensajes() {
                                 <img
                                   src={m.mediaUrl}
                                   alt="Adjunto"
+                                  onLoad={() => scrollToBottom('auto')}
                                   style={{ maxWidth: '100%', maxHeight: '240px', borderRadius: '8px', display: 'block', cursor: 'pointer' }}
                                 />
                               </a>
@@ -1222,7 +1251,25 @@ export default function Mensajes() {
                             </div>
                           )}
 
-                          <div>{m.text}</div>
+                          {/* Texto o comentario del mensaje */}
+                          {(() => {
+                            if (!m.text) return null;
+                            if (m.mediaUrl) {
+                              const cleanText = m.text.replace(/^[📄📷📎\s]+/, '').trim().toLowerCase();
+                              const cleanFilename = (m.mediaFilename || '').replace(/^[📄📷📎\s]+/, '').trim().toLowerCase();
+                              if (
+                                !cleanText ||
+                                cleanText === cleanFilename ||
+                                cleanText === 'imagen' ||
+                                cleanText === 'imagen enviada' ||
+                                cleanText === 'archivo' ||
+                                cleanText === 'documento adjunto'
+                              ) {
+                                return null;
+                              }
+                            }
+                            return <div style={{ marginTop: m.mediaUrl ? '6px' : 0 }}>{m.text}</div>;
+                          })()}
                           <span className="bubble-time">{m.time}</span>
                         </div>
                       </div>

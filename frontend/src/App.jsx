@@ -16,8 +16,23 @@ function App() {
   const [authChecked, setAuthChecked] = useState(false);
   const [username, setUsername] = useState('');
 
-  // Navigation state
-  const [currentView, setCurrentView] = useState('prospectos');
+  // Navigation state - persist current view across refreshes
+  const [currentView, setCurrentView] = useState(() => {
+    try {
+      const saved = localStorage.getItem('ap_current_view');
+      const validViews = ['prospectos', 'tratos', 'pipelines', 'personas', 'empresas', 'mensajes', 'calendario', 'rendimiento', 'crm-config', 'social', 'app-config'];
+      return (saved && validViews.includes(saved)) ? saved : 'prospectos';
+    } catch {
+      return 'prospectos';
+    }
+  });
+
+  const handleNavigate = (view) => {
+    setCurrentView(view);
+    try {
+      localStorage.setItem('ap_current_view', view);
+    } catch {}
+  };
 
   useEffect(() => {
     const storedToken = localStorage.getItem('ap_token');
@@ -89,7 +104,7 @@ function App() {
   return (
     <Layout
       currentView={currentView}
-      onNavigate={setCurrentView}
+      onNavigate={handleNavigate}
       onLogout={handleLogout}
       username={username}
     >

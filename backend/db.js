@@ -13,12 +13,22 @@ function cleanEnv(val, fallback = '') {
 const NEON_DB_URL = 'postgresql://neondb_owner:npg_J53gAIlxnNhS@ep-young-frost-b4c214hn-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
 const dbUrl = cleanEnv(process.env.DATABASE_URL) || NEON_DB_URL;
 
-// Configuración de PostgreSQL en NeonDB
+// Configuración de PostgreSQL en NeonDB con pool resiliente
 const pool = new Pool({
   connectionString: dbUrl,
   ssl: {
     rejectUnauthorized: false
-  }
+  },
+  max: 10,
+  idleTimeoutMillis: 30000, // Liberar conexiones inactivas a los 30s antes de que Neon corte el socket
+  connectionTimeoutMillis: 10000
+});
+
+// Manejador de errores en conexiones inactivas del Pool
+// NeonDB cierra conexiones inactivas automáticamente por timeout de PgBouncer.
+// Este listener evita que Node.js interprete el corte como error fatal y tumbe el servidor.
+pool.on('error', (err) => {
+  console.warn('[NeonDB Pool] Conexión inactiva liberada por NeonDB o red:', err.message);
 });
 
 // Configuración de Neon Object Storage (S3)
@@ -202,13 +212,14 @@ async function saveIncomingMessage({ from, contactName, text, mediaType = 'text'
 }
 
 // Guardar mensaje saliente enviado por un monitor / vendedor desde el CRM
-async function saveOutgoingMessage({ to, contactName, text, mediaType = 'text', mediaUrl = null, mediaFilename = null, vendedor = 'Marcos Ferreyra', msgId }) {
+async function saveOutgoingMessage({ to, contactName, text, preview = null, mediaType = 'text', mediaUrl = null, mediaFilename = null, vendedor = 'Marcos Ferreyra', msgId }) {
   const cleanId = String(to).replace(/\D/g, '');
   const numero = `+${cleanId}`;
   const nowMs = Date.now();
   const timeStr = formatPeruTime(nowMs);
   const messageId = msgId || `out_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   const initials = (contactName || cleanId).split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase() || 'WA';
+  const previewText = preview || text || (mediaType === 'image' ? '📷 Imagen' : `📄 ${mediaFilename || 'Archivo'}`);
 
   // Upsert chat
   await pool.query(`
@@ -218,7 +229,7 @@ async function saveOutgoingMessage({ to, contactName, text, mediaType = 'text', 
       preview = EXCLUDED.preview,
       fecha = 'Hoy',
       updated_at = NOW();
-  `, [cleanId, numero, contactName || numero, initials, text]);
+  `, [cleanId, numero, contactName || numero, initials, previewText]);
 
   // Agregar vendedor al array de vendedores del chat si no está
   if (vendedor) {
@@ -296,8 +307,9 @@ async function uploadToS3(fileBuffer, originalFilename, mimeType) {
     ContentType: mimeType
   }));
 
-  // Endpoint directo o URL proxy
-  const endpoint = process.env.AWS_ENDPOINT_URL_S3 ? process.env.AWS_ENDPOINT_URL_S3.replace(/\/$/, '') : '';
+  // Endpoint directo o URL proxy (limpiando comillas, espacios y slashes finales)
+  const rawEndpoint = cleanEnv(process.env.AWS_ENDPOINT_URL_S3, 'https://br-solitary-union-b4pci6t0.storage.c-6.us-east-2.aws.neon.tech');
+  const endpoint = rawEndpoint.replace(/\/+$/, '');
   const publicUrl = `${endpoint}/${S3_BUCKET}/${uniqueKey}`;
   return { key: uniqueKey, url: publicUrl, filename: originalFilename, mimeType };
 }

@@ -425,19 +425,26 @@ app.post('/api/whatsapp/send', requireAuth, async (req, res) => {
   const cleanNumber = to.replace(/\D/g, '');
   let metaResponse = null;
 
+  const cleanMediaUrl = mediaUrl ? cleanEnv(mediaUrl) : null;
+  const cleanMediaFilename = mediaFilename ? cleanEnv(mediaFilename) : null;
+  const trimmedMessage = message ? String(message).trim() : '';
+
   const sendToMeta = (tokenToUse) => {
     let payload;
-    if (mediaUrl && (mediaType === 'image' || mediaType === 'document')) {
+    if (cleanMediaUrl && (mediaType === 'image' || mediaType === 'document')) {
+      const mediaPayload = {
+        link: cleanMediaUrl,
+        caption: trimmedMessage || undefined
+      };
+      if (mediaType === 'document' && cleanMediaFilename) {
+        mediaPayload.filename = cleanMediaFilename;
+      }
       payload = {
         messaging_product: "whatsapp",
         recipient_type: "individual",
         to: cleanNumber,
         type: mediaType,
-        [mediaType]: {
-          link: mediaUrl,
-          caption: message || undefined,
-          filename: mediaFilename || undefined
-        }
+        [mediaType]: mediaPayload
       };
     } else {
       payload = {
@@ -447,7 +454,7 @@ app.post('/api/whatsapp/send', requireAuth, async (req, res) => {
         type: "text",
         text: {
           preview_url: false,
-          body: message || ''
+          body: trimmedMessage || ''
         }
       };
     }
@@ -488,14 +495,16 @@ app.post('/api/whatsapp/send', requireAuth, async (req, res) => {
 
   // Guardar siempre en NeonDB para que todos los monitores lo vean de inmediato
   try {
-    const textToSave = message || (mediaType === 'image' ? '📷 Imagen enviada' : `📄 ${mediaFilename || 'Archivo'}`);
+    const textToSave = trimmedMessage;
+    const previewToSave = trimmedMessage || (mediaType === 'image' ? '📷 Imagen' : `📄 ${cleanMediaFilename || 'Archivo'}`);
     const saved = await saveOutgoingMessage({
       to: cleanNumber,
       contactName: nombre,
       text: textToSave,
+      preview: previewToSave,
       mediaType: mediaType || 'text',
-      mediaUrl: mediaUrl || null,
-      mediaFilename: mediaFilename || null,
+      mediaUrl: cleanMediaUrl,
+      mediaFilename: cleanMediaFilename || null,
       vendedor: vendedor || 'Marcos Ferreyra',
       msgId: metaResponse?.messages?.[0]?.id
     });
@@ -526,6 +535,14 @@ app.get('*', (req, res) => {
     res.status(404).json({ error: 'Ruta API no encontrada' });
   }
 });
+// Manejadores globales para evitar caídas del proceso por desconexiones o errores no capturados
+process.on('unhandledRejection', (reason) => {
+  console.warn('[Process Unhandled Rejection]:', reason?.message || reason);
+});
+process.on('uncaughtException', (err) => {
+  console.warn('[Process Uncaught Exception]:', err?.message || err);
+});
+
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`Backend server running on http://localhost:${PORT}`);

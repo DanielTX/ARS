@@ -73,8 +73,24 @@ const navItems = [
 ];
 
 export default function Layout({ currentView, onNavigate, onLogout, username, children }) {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('ap_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const toggleSidebar = () => {
+    setSidebarCollapsed(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('ap_sidebar_collapsed', String(next));
+      } catch {}
+      return next;
+    });
+  };
 
   const activeLabel = navItems.flatMap(g => g.items).find(i => i.id === currentView)?.label || '';
 
@@ -89,7 +105,12 @@ export default function Layout({ currentView, onNavigate, onLogout, username, ch
       <aside className={`crm-sidebar ${mobileOpen ? 'mobile-open' : ''}`}>
         {/* Logo */}
         <div className="sidebar-logo">
-          <div className="sidebar-logo-icon">
+          <div
+            className="sidebar-logo-icon"
+            onClick={sidebarCollapsed ? toggleSidebar : undefined}
+            title={sidebarCollapsed ? 'AutoPost CRM · Click para expandir' : 'AutoPost CRM'}
+            style={{ cursor: sidebarCollapsed ? 'pointer' : 'default' }}
+          >
             <svg viewBox="0 0 24 24" fill="none">
               <path d="M22 2L11 13" stroke="url(#sl1)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
               <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="url(#sl1)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -106,24 +127,17 @@ export default function Layout({ currentView, onNavigate, onLogout, username, ch
               <span className="sidebar-brand-sub">CRM Suite</span>
             </div>
           )}
-          <button className="sidebar-collapse-btn" onClick={() => setSidebarCollapsed(c => !c)} title={sidebarCollapsed ? 'Expandir' : 'Colapsar'}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <button
+            className={`sidebar-collapse-btn ${sidebarCollapsed ? 'is-collapsed' : ''}`}
+            onClick={toggleSidebar}
+            title={sidebarCollapsed ? 'Expandir panel lateral' : 'Colapsar panel lateral'}
+            aria-label={sidebarCollapsed ? 'Expandir panel lateral' : 'Colapsar panel lateral'}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
               <path d={sidebarCollapsed ? 'M9 18l6-6-6-6' : 'M15 18l-6-6 6-6'} />
             </svg>
           </button>
         </div>
-
-        {/* Workspace */}
-        {!sidebarCollapsed && (
-          <div className="sidebar-workspace">
-            <div className="workspace-avatar">{username?.[0]?.toUpperCase() || 'D'}</div>
-            <div className="workspace-info">
-              <div className="workspace-name">Mi empresa</div>
-              <div className="workspace-role">Administrador</div>
-            </div>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6"/></svg>
-          </div>
-        )}
 
         {/* Search */}
         {!sidebarCollapsed && (
@@ -177,7 +191,18 @@ export default function Layout({ currentView, onNavigate, onLogout, username, ch
         {/* Top bar */}
         <header className="crm-topbar">
           <div className="topbar-left">
-            <button className="topbar-menu-btn" onClick={() => setMobileOpen(o => !o)}>
+            <button
+              className="topbar-menu-btn"
+              onClick={() => {
+                if (window.innerWidth <= 768) {
+                  setMobileOpen(o => !o);
+                } else {
+                  toggleSidebar();
+                }
+              }}
+              title={sidebarCollapsed ? 'Expandir panel lateral' : 'Colapsar panel lateral'}
+              aria-label={sidebarCollapsed ? 'Expandir panel lateral' : 'Colapsar panel lateral'}
+            >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M3 12h18M3 6h18M3 18h18"/>
               </svg>
