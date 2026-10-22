@@ -226,6 +226,32 @@ app.post('/api/publish', requireAuth, upload.single('image'), async (req, res) =
 // WhatsApp Cloud API - Webhooks & Mensajería Multimoderador (NeonDB)
 // ==========================================================
 
+// DIAGNÓSTICO: Ver qué token y phone ID usa Vercel en producción
+app.get('/api/debug-wa', requireAuth, async (req, res) => {
+  const axios = require('axios');
+  const waToken = getActiveWaToken();
+  const waPhoneId = getActiveWaPhoneId();
+  const envToken = cleanEnv(process.env.WHATSAPP_TOKEN);
+  const envPhoneId = cleanEnv(process.env.WHATSAPP_PHONE_ID);
+
+  let metaCheck = null;
+  try {
+    const r = await axios.get(`https://graph.facebook.com/v21.0/me?access_token=${waToken}`);
+    metaCheck = r.data;
+  } catch (e) {
+    metaCheck = { error: e.response?.data || e.message };
+  }
+
+  res.json({
+    envTokenPrefix: envToken ? envToken.substring(0, 25) + '...' : '(no definido)',
+    envPhoneId: envPhoneId || '(no definido)',
+    activeTokenPrefix: waToken ? waToken.substring(0, 25) + '...' : '(vacío)',
+    activePhoneId: waPhoneId,
+    metaTokenValid: metaCheck,
+    WA_TOKEN_ACTIVE_prefix: 'EAARJyE2gulIBS6...'
+  });
+});
+
 // 1. Verificación del Webhook (GET) - Requerido por Meta
 app.get('/api/whatsapp/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
@@ -373,22 +399,17 @@ function cleanEnv(val, fallback = '') {
   return String(val).trim().replace(/^["']|["']$/g, '').trim();
 }
 
-// Token activo y validado de Meta WhatsApp Cloud API
+// Token activo y validado de Meta WhatsApp Cloud API (hardcoded - no depende de env vars de Vercel)
 const WA_TOKEN_ACTIVE = "EAARJyE2gulIBS6zeMiNG9fxL4fFPXIQCA58UOjnUA10uQt59rmfKjSsnUdbuja9YDZAojL9ixtON3ipENtzfJB5ZAZCpCqUZB3RuOfcHaJlHTa7ZBgyXor8vEJSRTn8fXfaAkTZCtZBasiXhUVZAnRMbg9JnA9UtvQwWkZCRwDbcLHsjSyOq4TlnOkg02wbBeY2DSmAZDZD";
 const WA_PHONE_ID_ACTIVE = "1371608269374423";
 
+// Siempre usar el token y phone ID activos hardcoded — sin depender de variables de entorno
 function getActiveWaToken() {
-  const envToken = cleanEnv(process.env.WHATSAPP_TOKEN);
-  // Solo usar envToken si es el token verificado de WhatsApp Cloud API (inicia con EAARJyE2gulIBS6)
-  if (envToken && envToken.startsWith("EAARJyE2gulIBS6") && envToken.length > 50) {
-    return envToken;
-  }
   return WA_TOKEN_ACTIVE;
 }
 
 function getActiveWaPhoneId() {
-  const envPhone = cleanEnv(process.env.WHATSAPP_PHONE_ID);
-  return envPhone || WA_PHONE_ID_ACTIVE;
+  return WA_PHONE_ID_ACTIVE;
 }
 
 // 7. Enviar mensaje desde el CRM hacia Meta WhatsApp Cloud API y persistir en NeonDB
