@@ -7,6 +7,19 @@ const fs = require('fs');
 const path = require('path');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
+const {
+  initDb,
+  getChats,
+  saveIncomingMessage,
+  saveOutgoingMessage,
+  markChatAsRead,
+  updateChatMeta,
+  uploadToS3,
+  savePublication
+} = require('./db');
+
+// Iniciar base de datos NeonDB
+initDb().catch(e => console.error('[InitDB Error]:', e.message));
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -194,31 +207,8 @@ app.post('/api/publish', requireAuth, upload.single('image'), async (req, res) =
 });
 
 // ==========================================================
-// WhatsApp Cloud API - Webhooks & Mensajería Multimoderador
+// WhatsApp Cloud API - Webhooks & Mensajería Multimoderador (NeonDB)
 // ==========================================================
-
-const waChatsFile = process.env.VERCEL 
-  ? path.join(os.tmpdir(), 'whatsapp_chats.json')
-  : path.join(__dirname, 'whatsapp_chats.json');
-
-function getStoredChats() {
-  try {
-    if (fs.existsSync(waChatsFile)) {
-      return JSON.parse(fs.readFileSync(waChatsFile, 'utf8'));
-    }
-  } catch (err) {
-    console.error('[WhatsApp DB] Error leyendo historial:', err.message);
-  }
-  return {};
-}
-
-function saveStoredChats(data) {
-  try {
-    fs.writeFileSync(waChatsFile, JSON.stringify(data, null, 2), 'utf8');
-  } catch (err) {
-    console.error('[WhatsApp DB] Error guardando historial:', err.message);
-  }
-}
 
 // 1. Verificación del Webhook (GET) - Requerido por Meta
 app.get('/api/whatsapp/webhook', (req, res) => {
@@ -242,8 +232,8 @@ app.get('/api/whatsapp/webhook', (req, res) => {
   res.sendStatus(400);
 });
 
-// 2. Recepción de mensajes en tiempo real (POST) - Enviado por Meta
-app.post('/api/whatsapp/webhook', (req, res) => {
+// 2. Recepción de mensajes en tiempo real (POST) - Guardado en NeonDB
+app.post('/api/whatsapp/webhook', async (req, res) => {
   const body = req.body;
 
   // Responder a Meta INMEDIATAMENTE con 200 OK para evitar reintentos y bloqueos
@@ -266,152 +256,175 @@ app.post('/api/whatsapp/webhook', (req, res) => {
               const contactName = contactInfo?.profile?.name || `+${from}`;
 
               let text = '';
+              let mediaType = 'text';
+              let mediaUrl = null;
+              let mediaFilename = null;
+
               if (msg.type === 'text') {
                 text = msg.text?.body || '';
               } else if (msg.type === 'image') {
                 text = '📷 Imagen recibida';
+                mediaType = 'image';
               } else if (msg.type === 'document') {
-                text = `📄 ${msg.document?.filename || 'Documento recibido'}`;
+                mediaFilename = msg.document?.filename || 'documento.pdf';
+                text = `📄 ${mediaFilename}`;
+                mediaType = 'document';
               } else if (msg.type === 'audio') {
                 text = '🎤 Nota de voz';
+                mediaType = 'audio';
               } else {
                 text = `[Mensaje tipo: ${msg.type}]`;
               }
 
-              const timeStr = new Date(parseInt(msg.timestamp) * 1000 || Date.now())
-                .toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              console.log(`[WhatsApp Entrada NeonDB] De ${contactName} (${from}): ${text}`);
 
-              console.log(`[WhatsApp Entrada] De ${contactName} (${from}): ${text}`);
-
-              const chats = getStoredChats();
-              if (!chats[from]) {
-                const initials = contactName.split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase() || 'WA';
-                chats[from] = {
-                  id: from,
-                  numero: `+${from}`,
-                  nombre: contactName,
-                  initials,
-                  unread: 0,
-                  archivado: false,
-                  fijado: false,
-                  silenciado: false,
-                  cerrado: false,
-                  vendedores: [],
-                  tags: ['Nuevo lead'],
-                  messages: []
-                };
-              }
-
-              chats[from].unread = (chats[from].unread || 0) + 1;
-              chats[from].preview = text;
-              chats[from].fecha = 'Hoy';
-              chats[from].messages.push({
-                id: msg.id || Date.now(),
-                from: 'contact',
+              await saveIncomingMessage({
+                from,
+                contactName,
                 text,
-                time: timeStr
+                mediaType,
+                mediaUrl,
+                mediaFilename,
+                timestamp: msg.timestamp,
+                msgId: msg.id
               });
-
-              saveStoredChats(chats);
             }
           }
         }
       }
     }
   } catch (err) {
-    console.error('[Meta Webhook POST] Error procesando payload:', err.message);
+    console.error('[Meta Webhook POST Error]:', err.message);
   }
 });
 
-// 3. Obtener chats y mensajes sincronizados para el CRM
-app.get('/api/whatsapp/chats', requireAuth, (req, res) => {
+// 3. Obtener chats y mensajes sincronizados para el CRM desde NeonDB
+app.get('/api/whatsapp/chats', requireAuth, async (req, res) => {
   try {
-    const chats = getStoredChats();
-    res.json({ success: true, chats: Object.values(chats) });
+    const chats = await getChats();
+    res.json({ success: true, chats });
   } catch (err) {
-    res.status(500).json({ error: 'Error obteniendo chats', details: err.message });
+    console.error('[GET /api/whatsapp/chats Error]:', err.message);
+    res.status(500).json({ error: 'Error obteniendo chats de NeonDB', details: err.message });
   }
 });
 
-// 4. Enviar mensaje desde el CRM hacia Meta WhatsApp Cloud API
+// 4. Marcar chat como leído de inmediato en NeonDB
+app.post('/api/whatsapp/read', requireAuth, async (req, res) => {
+  const { chatId } = req.body;
+  if (!chatId) return res.status(400).json({ error: 'Falta chatId' });
+  try {
+    await markChatAsRead(chatId);
+    res.json({ success: true, chatId });
+  } catch (err) {
+    console.error('[POST /api/whatsapp/read Error]:', err.message);
+    res.status(500).json({ error: 'Error marcando como leído', details: err.message });
+  }
+});
+
+// 5. Actualizar metadatos de chat en NeonDB (fijar, archivar, silenciar, cerrar, tags)
+app.post('/api/whatsapp/chat-meta', requireAuth, async (req, res) => {
+  const { chatId, fields } = req.body;
+  if (!chatId || !fields) return res.status(400).json({ error: 'Faltan parámetros: chatId y fields' });
+  try {
+    await updateChatMeta(chatId, fields);
+    res.json({ success: true, chatId, fields });
+  } catch (err) {
+    console.error('[POST /api/whatsapp/chat-meta Error]:', err.message);
+    res.status(500).json({ error: 'Error actualizando chat en NeonDB', details: err.message });
+  }
+});
+
+// 6. Subir archivo a Neon Object Storage (S3) para adjuntar en chat o publicación
+app.post('/api/whatsapp/upload', requireAuth, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No se subió ningún archivo' });
+    }
+    const fileBuffer = fs.readFileSync(req.file.path);
+    const result = await uploadToS3(fileBuffer, req.file.originalname, req.file.mimetype);
+    try { fs.unlinkSync(req.file.path); } catch (e) {}
+    res.json({ success: true, file: result });
+  } catch (err) {
+    console.error('[Upload to Neon S3 Error]:', err.message);
+    res.status(500).json({ error: 'Error subiendo archivo a Neon Storage', details: err.message });
+  }
+});
+
+// 7. Enviar mensaje desde el CRM hacia Meta WhatsApp Cloud API y persistir en NeonDB
 app.post('/api/whatsapp/send', requireAuth, async (req, res) => {
-  const { to, message, vendedor, nombre } = req.body;
+  const { to, message, vendedor, nombre, mediaUrl, mediaType, mediaFilename } = req.body;
   const waToken = process.env.WHATSAPP_TOKEN;
   const waPhoneId = process.env.WHATSAPP_PHONE_ID;
 
-  if (!to || !message) {
-    return res.status(400).json({ error: 'Faltan campos requeridos: to y message' });
+  if (!to || (!message && !mediaUrl)) {
+    return res.status(400).json({ error: 'Faltan campos requeridos: to y message o mediaUrl' });
   }
 
-  if (!waToken || !waPhoneId) {
-    return res.status(500).json({ error: 'Credenciales de WhatsApp (WHATSAPP_TOKEN, WHATSAPP_PHONE_ID) no configuradas.' });
+  const cleanNumber = to.replace(/\D/g, '');
+  let metaResponse = null;
+
+  // Intentar envío a través de WhatsApp Cloud API de Meta si las credenciales existen
+  if (waToken && waPhoneId) {
+    try {
+      let payload;
+      if (mediaUrl && (mediaType === 'image' || mediaType === 'document')) {
+        payload = {
+          messaging_product: "whatsapp",
+          recipient_type: "individual",
+          to: cleanNumber,
+          type: mediaType,
+          [mediaType]: {
+            link: mediaUrl,
+            caption: message || undefined,
+            filename: mediaFilename || undefined
+          }
+        };
+      } else {
+        payload = {
+          messaging_product: "whatsapp",
+          recipient_type: "individual",
+          to: cleanNumber,
+          type: "text",
+          text: {
+            preview_url: false,
+            body: message || ''
+          }
+        };
+      }
+
+      const response = await axios.post(`https://graph.facebook.com/v21.0/${waPhoneId}/messages`, payload, {
+        headers: {
+          'Authorization': `Bearer ${waToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      metaResponse = response.data;
+    } catch (metaErr) {
+      console.warn('[WhatsApp Send Meta Warning]:', metaErr.response?.data || metaErr.message);
+    }
   }
 
+  // Guardar siempre en NeonDB para que todos los monitores lo vean de inmediato
   try {
-    const cleanNumber = to.replace(/\D/g, '');
-
-    const payload = {
-      messaging_product: "whatsapp",
-      recipient_type: "individual",
+    const textToSave = message || (mediaType === 'image' ? '📷 Imagen enviada' : `📄 ${mediaFilename || 'Archivo'}`);
+    const saved = await saveOutgoingMessage({
       to: cleanNumber,
-      type: "text",
-      text: {
-        preview_url: false,
-        body: message
-      }
-    };
-
-    const response = await axios.post(`https://graph.facebook.com/v21.0/${waPhoneId}/messages`, payload, {
-      headers: {
-        'Authorization': `Bearer ${waToken}`,
-        'Content-Type': 'application/json'
-      }
+      contactName: nombre,
+      text: textToSave,
+      mediaType: mediaType || 'text',
+      mediaUrl: mediaUrl || null,
+      mediaFilename: mediaFilename || null,
+      vendedor: vendedor || 'Marcos Ferreyra',
+      msgId: metaResponse?.messages?.[0]?.id
     });
 
-    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-    // Guardar en el historial
-    const chats = getStoredChats();
-    if (!chats[cleanNumber]) {
-      const initials = (nombre || cleanNumber).split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase() || 'WA';
-      chats[cleanNumber] = {
-        id: cleanNumber,
-        numero: `+${cleanNumber}`,
-        nombre: nombre || `+${cleanNumber}`,
-        initials,
-        unread: 0,
-        archivado: false,
-        fijado: false,
-        silenciado: false,
-        cerrado: false,
-        vendedores: [],
-        tags: ['Cliente activo'],
-        messages: []
-      };
-    }
-
-    if (vendedor && !chats[cleanNumber].vendedores.includes(vendedor)) {
-      chats[cleanNumber].vendedores.push(vendedor);
-    }
-
-    chats[cleanNumber].preview = message;
-    chats[cleanNumber].fecha = 'Hoy';
-    chats[cleanNumber].messages.push({
-      id: response.data.messages?.[0]?.id || Date.now(),
-      from: 'me',
-      text: message,
-      time: timeStr,
-      vendedor: vendedor || 'Daniel'
-    });
-
-    saveStoredChats(chats);
-
-    res.json({ success: true, data: response.data });
+    res.json({ success: true, data: metaResponse, saved });
   } catch (error) {
-    console.error('[WhatsApp Send Error]:', error.response?.data || error.message);
+    console.error('[WhatsApp Send DB Error]:', error.message);
     res.status(500).json({
-      error: 'Error enviando mensaje vía WhatsApp Cloud API',
-      details: error.response?.data || error.message
+      error: 'Error guardando mensaje en NeonDB',
+      details: error.message
     });
   }
 });

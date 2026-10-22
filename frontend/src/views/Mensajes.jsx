@@ -65,6 +65,14 @@ const PLANTILLAS_WHATSAPP = [
   }
 ];
 
+// Categorías de Emojis para el CRM
+const EMOJIS_CATEGORIES = [
+  { name: 'Frecuentes / CRM', emojis: ['👍', '😊', '👋', '🙏', '🚀', '🔥', '❤️', '👏', '🎉', '💼', '📦', '💬', '📞', '🤝', '💰', '📅', '⏰', '🎯', '✅', '❌'] },
+  { name: 'Caritas', emojis: ['😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '🙂', '😉', '😌', '😍', '🥰', '😘', '😋', '😎', '🤩', '🥳', '🤔', '🙌'] },
+  { name: 'Gestos', emojis: ['👍', '👎', '👌', '✌️', '🤞', '🤝', '👏', '🙌', '👐', '🤲', '🙏', '💪', '👋', '👉', '👈', '👆', '👇', '✋', '✨', '⭐'] },
+  { name: 'Ventas y oficina', emojis: ['📊', '📈', '📉', '💡', '🏷️', '🛒', '🛍️', '📦', '🚚', '✈️', '💻', '📱', '📧', '✉️', '📋', '📁', '🏢', '🏆', '🥇', '⚡'] }
+];
+
 // Conversaciones de WhatsApp reales (sin datos ficticios)
 const CONVERSACIONES_INICIALES = [];
 
@@ -82,6 +90,11 @@ export default function Mensajes() {
   const [etiquetas, setEtiquetas] = useState(ETIQUETAS_INICIALES);
   const [plantillas, setPlantillas] = useState(PLANTILLAS_WHATSAPP);
   const [selectedId, setSelectedId] = useState(null);
+  const selectedIdRef = useRef(selectedId);
+
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
 
   // Estados de filtros
   const [tab, setTab] = useState('todos');
@@ -109,15 +122,21 @@ export default function Mensajes() {
   const [gestionarModalOpen, setGestionarModalOpen] = useState(false);
   const [nuevaEtiqueta, setNuevaEtiqueta] = useState({ nombre: '', color: '#7c6dff' });
 
-  // Input de chat
+  // Input de chat, Emojis y Adjuntos
   const [inputText, setInputText] = useState('');
   const messagesEndRef = useRef(null);
+  const chatInputRef = useRef(null);
+  const emojiPickerRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null); // { file, name, size, type, previewUrl }
+  const [isUploading, setIsUploading] = useState(false);
 
   const dropdownRefVendedor = useRef(null);
   const dropdownRefEtiquetas = useRef(null);
   const dropdownRefTresPuntos = useRef(null);
 
-  // Cerrar dropdowns al hacer click afuera
+  // Cerrar dropdowns y emoji picker al hacer click afuera
   useEffect(() => {
     function handleClickOutside(e) {
       if (dropdownRefVendedor.current && !dropdownRefVendedor.current.contains(e.target)) {
@@ -130,12 +149,43 @@ export default function Mensajes() {
         setMenuTresPuntosOpen(false);
         setSubmenuEtiquetasOpen(false);
       }
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(e.target)) {
+        setEmojiPickerOpen(false);
+      }
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Sincronizar mensajes en tiempo real desde el backend / Webhook de Meta
+  // Marcar chat como leído tanto en React local como en la base de datos NeonDB
+  const markAsRead = (chatId) => {
+    if (!chatId) return;
+    setConversaciones(prev => prev.map(c => String(c.id) === String(chatId) ? { ...c, unread: 0 } : c));
+    const token = localStorage.getItem('ap_token');
+    if (token) {
+      axios.post('/api/whatsapp/read', { chatId }, {
+        headers: { Authorization: `Bearer ${token}` }
+      }).catch(() => {});
+    }
+  };
+
+  // Guardar metadatos del chat (fijar, archivar, silenciar, etiquetas) en NeonDB
+  const saveChatMeta = (chatId, fields) => {
+    const token = localStorage.getItem('ap_token');
+    if (token) {
+      axios.post('/api/whatsapp/chat-meta', { chatId, fields }, {
+        headers: { Authorization: `Bearer ${token}` }
+      }).catch(() => {});
+    }
+  };
+
+  // Seleccionar un chat y marcarlo como leído inmediatamente
+  const handleSelectChat = (chatId) => {
+    setSelectedId(chatId);
+    markAsRead(chatId);
+  };
+
+  // Sincronizar mensajes en tiempo real desde NeonDB
   useEffect(() => {
     const token = localStorage.getItem('ap_token');
     if (!token) return;
@@ -146,29 +196,22 @@ export default function Mensajes() {
       }).then(res => {
         if (res.data?.success && Array.isArray(res.data.chats)) {
           const incomingChats = res.data.chats;
-          setConversaciones(prev => {
-            const prevMap = new Map(prev.map(c => [String(c.id), c]));
-            return incomingChats.map(inc => {
-              const key = String(inc.id || inc.numero);
-              const p = prevMap.get(key);
-              if (p) {
-                return {
-                  ...inc,
-                  fijado: p.fijado !== undefined ? p.fijado : inc.fijado,
-                  archivado: p.archivado !== undefined ? p.archivado : inc.archivado,
-                  silenciado: p.silenciado !== undefined ? p.silenciado : inc.silenciado,
-                  cerrado: p.cerrado !== undefined ? p.cerrado : inc.cerrado,
-                  tags: p.tags?.length ? p.tags : (inc.tags || ['Nuevo lead']),
-                  vendedores: p.vendedores?.length ? p.vendedores : (inc.vendedores || [])
-                };
-              }
-              return inc;
-            });
-          });
+          const currentSelected = selectedIdRef.current;
+
+          setConversaciones(incomingChats.map(inc => {
+            const isCurrentlyOpen = String(inc.id) === String(currentSelected);
+            return {
+              ...inc,
+              unread: isCurrentlyOpen ? 0 : (inc.unread || 0)
+            };
+          }));
 
           setSelectedId(prev => {
-            if (!prev && incomingChats.length > 0) return incomingChats[0].id;
-            if (prev && !incomingChats.some(c => c.id === prev) && incomingChats.length > 0) return incomingChats[0].id;
+            if (!prev && incomingChats.length > 0) {
+              const firstId = incomingChats[0].id;
+              markAsRead(firstId);
+              return firstId;
+            }
             return prev;
           });
         }
@@ -227,20 +270,91 @@ export default function Mensajes() {
       return 0;
     });
 
-  // Enviar mensaje
-  const handleSendMessage = (customText) => {
-    const textToSend = (customText || inputText).trim();
-    if (!textToSend || !activeChat) return;
+  // Manejadores de archivos adjuntos
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const isImage = file.type.startsWith('image/');
+    const previewUrl = isImage ? URL.createObjectURL(file) : null;
+    setSelectedFile({
+      file,
+      name: file.name,
+      size: (file.size / 1024).toFixed(1) + ' KB',
+      type: isImage ? 'image' : 'document',
+      previewUrl
+    });
+    e.target.value = '';
+  };
 
-    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const handleRemoveFile = () => {
+    if (selectedFile?.previewUrl) {
+      URL.revokeObjectURL(selectedFile.previewUrl);
+    }
+    setSelectedFile(null);
+  };
+
+  const handleInsertEmoji = (emoji) => {
+    setInputText(prev => prev + emoji);
+    if (chatInputRef.current) {
+      chatInputRef.current.focus();
+    }
+  };
+
+  // Enviar mensaje (con soporte de texto, hora de Perú y archivos adjuntos)
+  const handleSendMessage = async (customText) => {
+    const textToSend = (customText || inputText).trim();
+    if (!textToSend && !selectedFile) return;
+    if (!activeChat) return;
+
+    // Hora oficial zonal de Perú (UTC-5)
+    const timeStr = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Lima',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    }).format(new Date());
+
     const currentVendedor = 'Marcos Ferreyra';
+
+    let mediaUrl = null;
+    let mediaType = 'text';
+    let mediaFilename = null;
+
+    if (selectedFile) {
+      setIsUploading(true);
+      try {
+        const formData = new FormData();
+        formData.append('file', selectedFile.file);
+        const token = localStorage.getItem('ap_token');
+        const uploadRes = await axios.post('/api/whatsapp/upload', formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+            Authorization: `Bearer ${token}`
+          }
+        });
+        if (uploadRes.data?.success && uploadRes.data?.file) {
+          mediaUrl = uploadRes.data.file.url;
+          mediaType = selectedFile.type;
+          mediaFilename = selectedFile.name;
+        }
+      } catch (err) {
+        console.error('Error subiendo archivo a Neon S3:', err);
+      } finally {
+        setIsUploading(false);
+      }
+    }
+
+    const previewMsgText = textToSend || (mediaType === 'image' ? '📷 Imagen' : `📄 ${mediaFilename || 'Archivo'}`);
 
     const newMsg = {
       id: Date.now(),
       from: 'me',
-      text: textToSend,
+      text: previewMsgText,
       time: timeStr,
-      vendedor: currentVendedor
+      vendedor: currentVendedor,
+      mediaType,
+      mediaUrl: mediaUrl || selectedFile?.previewUrl,
+      mediaFilename
     };
 
     setConversaciones(prev => prev.map(c => {
@@ -252,7 +366,7 @@ export default function Mensajes() {
         return {
           ...c,
           messages: [...(c.messages || []), newMsg],
-          preview: textToSend,
+          preview: previewMsgText,
           fecha: 'Hoy',
           unread: 0,
           cerrado: false,
@@ -263,19 +377,23 @@ export default function Mensajes() {
     }));
 
     if (!customText) setInputText('');
+    handleRemoveFile();
 
-    // Disparar envío a través de Meta WhatsApp Cloud API en el backend
+    // Disparar envío a través del backend hacia NeonDB y Meta WhatsApp Cloud API
     const token = localStorage.getItem('ap_token');
     if (token) {
       axios.post('/api/whatsapp/send', {
         to: activeChat.numero,
         message: textToSend,
         vendedor: currentVendedor,
-        nombre: activeChat.nombre
+        nombre: activeChat.nombre,
+        mediaUrl,
+        mediaType,
+        mediaFilename
       }, {
         headers: { Authorization: `Bearer ${token}` }
       }).catch(err => {
-        console.warn('[WhatsApp Send] Aviso (modo demo o credenciales pendientes):', err.response?.data || err.message);
+        console.warn('[WhatsApp Send] Aviso:', err.response?.data || err.message);
       });
     }
   };
@@ -283,7 +401,11 @@ export default function Mensajes() {
   // Alternar archivar
   const toggleArchivar = (chatId) => {
     setConversaciones(prev => prev.map(c => {
-      if (c.id === chatId) return { ...c, archivado: !c.archivado };
+      if (c.id === chatId) {
+        const newVal = !c.archivado;
+        saveChatMeta(chatId, { archivado: newVal });
+        return { ...c, archivado: newVal };
+      }
       return c;
     }));
   };
@@ -291,7 +413,11 @@ export default function Mensajes() {
   // Alternar fijar
   const toggleFijar = (chatId) => {
     setConversaciones(prev => prev.map(c => {
-      if (c.id === chatId) return { ...c, fijado: !c.fijado };
+      if (c.id === chatId) {
+        const newVal = !c.fijado;
+        saveChatMeta(chatId, { fijado: newVal });
+        return { ...c, fijado: newVal };
+      }
       return c;
     }));
   };
@@ -299,7 +425,11 @@ export default function Mensajes() {
   // Alternar silenciar
   const toggleSilenciar = (chatId) => {
     setConversaciones(prev => prev.map(c => {
-      if (c.id === chatId) return { ...c, silenciado: !c.silenciado };
+      if (c.id === chatId) {
+        const newVal = !c.silenciado;
+        saveChatMeta(chatId, { silenciado: newVal });
+        return { ...c, silenciado: newVal };
+      }
       return c;
     }));
   };
@@ -307,7 +437,15 @@ export default function Mensajes() {
   // Alternar leído / no leído
   const toggleLeido = (chatId) => {
     setConversaciones(prev => prev.map(c => {
-      if (c.id === chatId) return { ...c, unread: c.unread > 0 ? 0 : 1 };
+      if (c.id === chatId) {
+        const newVal = c.unread > 0 ? 0 : 1;
+        if (newVal === 0) {
+          markAsRead(chatId);
+        } else {
+          saveChatMeta(chatId, { unread: 1 });
+        }
+        return { ...c, unread: newVal };
+      }
       return c;
     }));
   };
@@ -316,6 +454,7 @@ export default function Mensajes() {
   const handleCerrarConversacion = (chatId) => {
     setConversaciones(prev => prev.map(c => {
       if (c.id === chatId) {
+        saveChatMeta(chatId, { cerrado: true, unread: 0 });
         return {
           ...c,
           cerrado: true,
@@ -340,6 +479,7 @@ export default function Mensajes() {
         const newTags = hasTag
           ? c.tags.filter(t => t !== tagName)
           : [...c.tags, tagName];
+        saveChatMeta(activeChat.id, { tags: newTags });
         return { ...c, tags: newTags };
       }
       return c;
@@ -694,10 +834,7 @@ export default function Mensajes() {
                 <div
                   key={c.id}
                   className={`conv-item ${selectedId === c.id ? 'conv-selected' : ''}`}
-                  onClick={() => {
-                    setSelectedId(c.id);
-                    if (c.unread > 0) toggleLeido(c.id);
-                  }}
+                  onClick={() => handleSelectChat(c.id)}
                 >
                   {/* Avatar de contacto */}
                   <div className="conv-avatar" style={{ background: getAvatarColor(c.id), position: 'relative' }}>
@@ -1043,6 +1180,46 @@ export default function Mensajes() {
                               {m.vendedor}
                             </div>
                           )}
+
+                          {/* Previsualización de Imagen si el mensaje contiene una */}
+                          {m.mediaType === 'image' && m.mediaUrl && (
+                            <div style={{ marginBottom: '6px' }}>
+                              <a href={m.mediaUrl} target="_blank" rel="noreferrer" title="Abrir imagen completa">
+                                <img
+                                  src={m.mediaUrl}
+                                  alt="Adjunto"
+                                  style={{ maxWidth: '100%', maxHeight: '240px', borderRadius: '8px', display: 'block', cursor: 'pointer' }}
+                                />
+                              </a>
+                            </div>
+                          )}
+
+                          {/* Previsualización de Documento si el mensaje contiene uno */}
+                          {m.mediaType === 'document' && m.mediaUrl && (
+                            <div style={{ marginBottom: '6px' }}>
+                              <a
+                                href={m.mediaUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '8px',
+                                  color: '#60a5fa',
+                                  textDecoration: 'none',
+                                  background: 'rgba(0,0,0,0.25)',
+                                  padding: '6px 10px',
+                                  borderRadius: '6px',
+                                  fontSize: '12px',
+                                  fontWeight: 500
+                                }}
+                              >
+                                <span>📄</span>
+                                <span style={{ textDecoration: 'underline' }}>{m.mediaFilename || 'Descargar archivo'}</span>
+                              </a>
+                            </div>
+                          )}
+
                           <div>{m.text}</div>
                           <span className="bubble-time">{m.time}</span>
                         </div>
@@ -1054,25 +1231,101 @@ export default function Mensajes() {
               )}
             </div>
 
+            {/* Barra de previsualización de archivo adjunto antes de enviar */}
+            {selectedFile && (
+              <div className="chat-attachment-bar">
+                {selectedFile.type === 'image' && selectedFile.previewUrl ? (
+                  <img src={selectedFile.previewUrl} alt="Preview" className="chat-attachment-thumb" />
+                ) : (
+                  <div className="chat-attachment-icon">📄</div>
+                )}
+                <div className="chat-attachment-info">
+                  <div className="chat-attachment-name">{selectedFile.name}</div>
+                  <div className="chat-attachment-size">{selectedFile.size}</div>
+                </div>
+                <button className="chat-attachment-close" onClick={handleRemoveFile} title="Quitar archivo">
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {/* Selector interactivo de Emojis */}
+            {emojiPickerOpen && (
+              <div className="emoji-picker-container" ref={emojiPickerRef}>
+                <div className="emoji-picker-header">Seleccionar Emoji</div>
+                <div className="emoji-picker-body">
+                  {EMOJIS_CATEGORIES.map(cat => (
+                    <div key={cat.name}>
+                      <div className="emoji-category-title">{cat.name}</div>
+                      <div className="emoji-grid">
+                        {cat.emojis.map((em, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            className="emoji-btn"
+                            onClick={() => handleInsertEmoji(em)}
+                          >
+                            {em}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Input de archivo oculto para el botón de clip */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              style={{ display: 'none' }}
+              accept="image/*,.pdf,.doc,.docx"
+            />
+
             {/* Barra de entrada de texto */}
             <div className="chat-input-bar">
-              <button className="chat-input-icon-btn" title="Emoji">😊</button>
-              <button className="chat-input-icon-btn" title="Adjuntar documento o imagen">
+              <button
+                type="button"
+                className={`chat-input-icon-btn ${emojiPickerOpen ? 'active' : ''}`}
+                onClick={() => setEmojiPickerOpen(o => !o)}
+                title="Emojis"
+              >
+                😊
+              </button>
+              <button
+                type="button"
+                className="chat-input-icon-btn"
+                onClick={() => fileInputRef.current?.click()}
+                title="Adjuntar documento o imagen"
+              >
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
                 </svg>
               </button>
               <input
+                ref={chatInputRef}
                 className="chat-input"
-                placeholder="Escribe un mensaje..."
+                placeholder={isUploading ? "Subiendo archivo..." : "Escribe un mensaje..."}
                 value={inputText}
+                disabled={isUploading}
                 onChange={e => setInputText(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
+                onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
               />
-              <button className="chat-send-btn" onClick={() => handleSendMessage()} title="Enviar mensaje">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
-                </svg>
+              <button
+                className="chat-send-btn"
+                onClick={() => handleSendMessage()}
+                disabled={isUploading}
+                title={isUploading ? "Enviando..." : "Enviar mensaje"}
+              >
+                {isUploading ? (
+                  <span style={{ fontSize: '12px' }}>⏳</span>
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                  </svg>
+                )}
               </button>
             </div>
           </>
