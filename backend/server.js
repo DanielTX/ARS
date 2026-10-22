@@ -367,11 +367,20 @@ app.post('/api/whatsapp/upload', requireAuth, upload.single('file'), async (req,
   }
 });
 
+// Helper para limpiar comillas de variables
+function cleanEnv(val, fallback = '') {
+  if (!val) return fallback;
+  return String(val).trim().replace(/^["']|["']$/g, '').trim();
+}
+
+const WA_TOKEN_FALLBACK = "EAARJyE2gulIBSX8n0KK9YVbXrAHEDr9Y5Yl0PM2IOk9ZAgXVZBdZAPwnIdnEmNmgtEP72AID8xPfLzs7xVtGvQy3bRRixBlb2KiWkPfLH88CrhZAkKrdAgD8duAkdTIaOI6WY0uS2w0nVDwOoZBVJ0WBX2zt5A8gDyZBW7e9ZBl2PWrSOWoUJY5Ftn4s94nUr0XOuRZCIIdYX16cSPHCmZC5XSsQnaFG1tn9SyTg88s8IZCiWMoQAqZBq5GBWDuZBUuE1brZCgaHKhWAObzVxYwXvTpQRVE29ZA0ZBKsR2I4NImgwZDZD";
+const WA_PHONE_ID_FALLBACK = "1371608269374423";
+
 // 7. Enviar mensaje desde el CRM hacia Meta WhatsApp Cloud API y persistir en NeonDB
 app.post('/api/whatsapp/send', requireAuth, async (req, res) => {
   const { to, message, vendedor, nombre, mediaUrl, mediaType, mediaFilename } = req.body;
-  const waToken = process.env.WHATSAPP_TOKEN;
-  const waPhoneId = process.env.WHATSAPP_PHONE_ID;
+  const waToken = cleanEnv(process.env.WHATSAPP_TOKEN, WA_TOKEN_FALLBACK);
+  const waPhoneId = cleanEnv(process.env.WHATSAPP_PHONE_ID, WA_PHONE_ID_FALLBACK);
 
   if (!to || (!message && !mediaUrl)) {
     return res.status(400).json({ error: 'Faltan campos requeridos: to y message o mediaUrl' });
@@ -380,45 +389,47 @@ app.post('/api/whatsapp/send', requireAuth, async (req, res) => {
   const cleanNumber = to.replace(/\D/g, '');
   let metaResponse = null;
 
-  // Intentar envío a través de WhatsApp Cloud API de Meta si las credenciales existen
-  if (waToken && waPhoneId) {
-    try {
-      let payload;
-      if (mediaUrl && (mediaType === 'image' || mediaType === 'document')) {
-        payload = {
-          messaging_product: "whatsapp",
-          recipient_type: "individual",
-          to: cleanNumber,
-          type: mediaType,
-          [mediaType]: {
-            link: mediaUrl,
-            caption: message || undefined,
-            filename: mediaFilename || undefined
-          }
-        };
-      } else {
-        payload = {
-          messaging_product: "whatsapp",
-          recipient_type: "individual",
-          to: cleanNumber,
-          type: "text",
-          text: {
-            preview_url: false,
-            body: message || ''
-          }
-        };
-      }
-
-      const response = await axios.post(`https://graph.facebook.com/v21.0/${waPhoneId}/messages`, payload, {
-        headers: {
-          'Authorization': `Bearer ${waToken}`,
-          'Content-Type': 'application/json'
+  // Enviar a través de WhatsApp Cloud API de Meta
+  try {
+    let payload;
+    if (mediaUrl && (mediaType === 'image' || mediaType === 'document')) {
+      payload = {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: cleanNumber,
+        type: mediaType,
+        [mediaType]: {
+          link: mediaUrl,
+          caption: message || undefined,
+          filename: mediaFilename || undefined
         }
-      });
-      metaResponse = response.data;
-    } catch (metaErr) {
-      console.warn('[WhatsApp Send Meta Warning]:', metaErr.response?.data || metaErr.message);
+      };
+    } else {
+      payload = {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: cleanNumber,
+        type: "text",
+        text: {
+          preview_url: false,
+          body: message || ''
+        }
+      };
     }
+
+    const response = await axios.post(`https://graph.facebook.com/v21.0/${waPhoneId}/messages`, payload, {
+      headers: {
+        'Authorization': `Bearer ${waToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    metaResponse = response.data;
+  } catch (metaErr) {
+    console.error('[WhatsApp Send Meta Error]:', metaErr.response?.data || metaErr.message);
+    return res.status(500).json({
+      error: 'Error enviando mensaje vía WhatsApp Cloud API',
+      details: metaErr.response?.data || metaErr.message
+    });
   }
 
   // Guardar siempre en NeonDB para que todos los monitores lo vean de inmediato
