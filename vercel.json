@@ -7,7 +7,11 @@
     },
     "frontend": {
       "root": "frontend",
-      "framework": "vite"
+      "framework": "vite",
+      "outputDirectory": "dist",
+      "rewrites": [
+        { "source": "/(.*)", "destination": "/index.html" }
+      ]
     }
   },
   "rewrites": [
@@ -15,18 +19,6 @@
       "source": "/api/(.*)",
       "destination": {
         "service": "backend"
-      }
-    },
-    {
-      "source": "/terms",
-      "destination": {
-        "service": "frontend"
-      }
-    },
-    {
-      "source": "/privacy",
-      "destination": {
-        "service": "frontend"
       }
     },
     {
