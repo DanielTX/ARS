@@ -145,13 +145,16 @@ app.post('/api/auth/login', (req, res) => {
 
 // Endpoint público de diagnóstico para verificar variables en Vercel
 app.get('/api/health', (req, res) => {
+  const envKeys = Object.keys(process.env).filter(k => 
+    !k.includes('SECRET') && !k.includes('PASS') && !k.includes('KEY') && !k.includes('TOKEN')
+  );
   res.json({
     status: 'ok',
+    envKeys,
     hasDatabaseUrl: !!process.env.DATABASE_URL,
     dbUrlLength: process.env.DATABASE_URL ? process.env.DATABASE_URL.length : 0,
     hasWaToken: !!process.env.WHATSAPP_TOKEN,
     hasWaPhoneId: !!process.env.WHATSAPP_PHONE_ID,
-    hasS3Key: !!process.env.AWS_ACCESS_KEY_ID,
     timestamp: new Date().toISOString()
   });
 });
