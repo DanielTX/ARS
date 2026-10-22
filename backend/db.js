@@ -3,9 +3,20 @@ const { S3Client, PutObjectCommand, GetObjectCommand } = require('@aws-sdk/clien
 const path = require('path');
 require('dotenv').config();
 
+// Limpieza de comillas accidentales de las variables de entorno
+function cleanEnv(val, fallback = '') {
+  if (!val) return fallback;
+  return String(val).trim().replace(/^["']|["']$/g, '').trim();
+}
+
+const dbUrl = cleanEnv(process.env.DATABASE_URL);
+if (!dbUrl) {
+  console.warn('[NeonDB Warning] DATABASE_URL no está definida en process.env');
+}
+
 // Configuración de PostgreSQL en NeonDB
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: dbUrl,
   ssl: {
     rejectUnauthorized: false
   }
@@ -13,11 +24,11 @@ const pool = new Pool({
 
 // Configuración de Neon Object Storage (S3)
 const s3Client = new S3Client({
-  region: process.env.AWS_REGION || 'us-east-2',
-  endpoint: process.env.AWS_ENDPOINT_URL_S3,
+  region: cleanEnv(process.env.AWS_REGION, 'us-east-2'),
+  endpoint: cleanEnv(process.env.AWS_ENDPOINT_URL_S3),
   credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || ''
+    accessKeyId: cleanEnv(process.env.AWS_ACCESS_KEY_ID),
+    secretAccessKey: cleanEnv(process.env.AWS_SECRET_ACCESS_KEY)
   },
   forcePathStyle: true
 });

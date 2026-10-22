@@ -236,9 +236,6 @@ app.get('/api/whatsapp/webhook', (req, res) => {
 app.post('/api/whatsapp/webhook', async (req, res) => {
   const body = req.body;
 
-  // Responder a Meta INMEDIATAMENTE con 200 OK para evitar reintentos y bloqueos
-  res.status(200).send('EVENT_RECEIVED');
-
   try {
     if (body.object === 'whatsapp_business_account') {
       const entries = body.entry || [];
@@ -296,6 +293,9 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
   } catch (err) {
     console.error('[Meta Webhook POST Error]:', err.message);
   }
+
+  // Responder a Meta 200 OK DESPUÉS de guardar en NeonDB para asegurar persistencia en Vercel Serverless
+  res.status(200).send('EVENT_RECEIVED');
 });
 
 // 3. Obtener chats y mensajes sincronizados para el CRM desde NeonDB
