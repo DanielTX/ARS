@@ -143,6 +143,19 @@ app.post('/api/auth/login', (req, res) => {
   return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
 });
 
+// Endpoint público de diagnóstico para verificar variables en Vercel
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    hasDatabaseUrl: !!process.env.DATABASE_URL,
+    dbUrlLength: process.env.DATABASE_URL ? process.env.DATABASE_URL.length : 0,
+    hasWaToken: !!process.env.WHATSAPP_TOKEN,
+    hasWaPhoneId: !!process.env.WHATSAPP_PHONE_ID,
+    hasS3Key: !!process.env.AWS_ACCESS_KEY_ID,
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Endpoint para verificar token (usado por el frontend al recargar)
 app.get('/api/auth/verify', requireAuth, (req, res) => {
   res.json({ valid: true, user: req.user.username });
