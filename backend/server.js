@@ -373,14 +373,29 @@ function cleanEnv(val, fallback = '') {
   return String(val).trim().replace(/^["']|["']$/g, '').trim();
 }
 
-const WA_TOKEN_FALLBACK = "EAARJyE2gulIBSX8n0KK9YVbXrAHEDr9Y5Yl0PM2IOk9ZAgXVZBdZAPwnIdnEmNmgtEP72AID8xPfLzs7xVtGvQy3bRRixBlb2KiWkPfLH88CrhZAkKrdAgD8duAkdTIaOI6WY0uS2w0nVDwOoZBVJ0WBX2zt5A8gDyZBW7e9ZBl2PWrSOWoUJY5Ftn4s94nUr0XOuRZCIIdYX16cSPHCmZC5XSsQnaFG1tn9SyTg88s8IZCiWMoQAqZBq5GBWDuZBUuE1brZCgaHKhWAObzVxYwXvTpQRVE29ZA0ZBKsR2I4NImgwZDZD";
-const WA_PHONE_ID_FALLBACK = "1371608269374423";
+// Token activo y validado de Meta WhatsApp Cloud API
+const WA_TOKEN_ACTIVE = "EAARJyE2gulIBS6zeMiNG9fxL4fFPXIQCA58UOjnUA10uQt59rmfKjSsnUdbuja9YDZAojL9ixtON3ipENtzfJB5ZAZCpCqUZB3RuOfcHaJlHTa7ZBgyXor8vEJSRTn8fXfaAkTZCtZBasiXhUVZAnRMbg9JnA9UtvQwWkZCRwDbcLHsjSyOq4TlnOkg02wbBeY2DSmAZDZD";
+const WA_PHONE_ID_ACTIVE = "1371608269374423";
+
+function getActiveWaToken() {
+  const envToken = cleanEnv(process.env.WHATSAPP_TOKEN);
+  // Si la variable en Vercel es el token viejo expirado (que empezaba con EAARJyE2gulIBSX8), ignorarla y usar el activo
+  if (envToken && !envToken.startsWith("EAARJyE2gulIBSX8") && envToken.length > 50) {
+    return envToken;
+  }
+  return WA_TOKEN_ACTIVE;
+}
+
+function getActiveWaPhoneId() {
+  const envPhone = cleanEnv(process.env.WHATSAPP_PHONE_ID);
+  return envPhone || WA_PHONE_ID_ACTIVE;
+}
 
 // 7. Enviar mensaje desde el CRM hacia Meta WhatsApp Cloud API y persistir en NeonDB
 app.post('/api/whatsapp/send', requireAuth, async (req, res) => {
   const { to, message, vendedor, nombre, mediaUrl, mediaType, mediaFilename } = req.body;
-  const waToken = cleanEnv(process.env.WHATSAPP_TOKEN, WA_TOKEN_FALLBACK);
-  const waPhoneId = cleanEnv(process.env.WHATSAPP_PHONE_ID, WA_PHONE_ID_FALLBACK);
+  const waToken = getActiveWaToken();
+  const waPhoneId = getActiveWaPhoneId();
 
   if (!to || (!message && !mediaUrl)) {
     return res.status(400).json({ error: 'Faltan campos requeridos: to y message o mediaUrl' });

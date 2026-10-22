@@ -393,7 +393,9 @@ export default function Mensajes() {
       }, {
         headers: { Authorization: `Bearer ${token}` }
       }).catch(err => {
-        console.warn('[WhatsApp Send] Aviso:', err.response?.data || err.message);
+        console.error('[WhatsApp Send] Error:', err.response?.data || err.message);
+        const errMsg = err.response?.data?.details?.error?.message || err.response?.data?.error || err.message;
+        alert(`No se pudo enviar el mensaje por WhatsApp: ${errMsg}`);
       });
     }
   };
