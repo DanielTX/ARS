@@ -379,8 +379,8 @@ const WA_PHONE_ID_ACTIVE = "1371608269374423";
 
 function getActiveWaToken() {
   const envToken = cleanEnv(process.env.WHATSAPP_TOKEN);
-  // Si la variable en Vercel es el token viejo expirado (que empezaba con EAARJyE2gulIBSX8), ignorarla y usar el activo
-  if (envToken && !envToken.startsWith("EAARJyE2gulIBSX8") && envToken.length > 50) {
+  // Solo usar envToken si es el token verificado de WhatsApp Cloud API (inicia con EAARJyE2gulIBS6)
+  if (envToken && envToken.startsWith("EAARJyE2gulIBS6") && envToken.length > 50) {
     return envToken;
   }
   return WA_TOKEN_ACTIVE;
@@ -404,8 +404,7 @@ app.post('/api/whatsapp/send', requireAuth, async (req, res) => {
   const cleanNumber = to.replace(/\D/g, '');
   let metaResponse = null;
 
-  // Enviar a través de WhatsApp Cloud API de Meta
-  try {
+  const sendToMeta = (tokenToUse) => {
     let payload;
     if (mediaUrl && (mediaType === 'image' || mediaType === 'document')) {
       payload = {
@@ -432,19 +431,38 @@ app.post('/api/whatsapp/send', requireAuth, async (req, res) => {
       };
     }
 
-    const response = await axios.post(`https://graph.facebook.com/v21.0/${waPhoneId}/messages`, payload, {
+    return axios.post(`https://graph.facebook.com/v21.0/${waPhoneId}/messages`, payload, {
       headers: {
-        'Authorization': `Bearer ${waToken}`,
+        'Authorization': `Bearer ${tokenToUse}`,
         'Content-Type': 'application/json'
       }
     });
+  };
+
+  // Enviar a través de WhatsApp Cloud API de Meta con auto-reintento
+  try {
+    const response = await sendToMeta(waToken);
     metaResponse = response.data;
   } catch (metaErr) {
-    console.error('[WhatsApp Send Meta Error]:', metaErr.response?.data || metaErr.message);
-    return res.status(500).json({
-      error: 'Error enviando mensaje vía WhatsApp Cloud API',
-      details: metaErr.response?.data || metaErr.message
-    });
+    if (waToken !== WA_TOKEN_ACTIVE) {
+      console.warn('[WhatsApp Send Warning] Token de entorno rechazado por Meta, reintentando con WA_TOKEN_ACTIVE...');
+      try {
+        const retryRes = await sendToMeta(WA_TOKEN_ACTIVE);
+        metaResponse = retryRes.data;
+      } catch (retryErr) {
+        console.error('[WhatsApp Send Retry Error]:', retryErr.response?.data || retryErr.message);
+        return res.status(500).json({
+          error: 'Error enviando mensaje vía WhatsApp Cloud API',
+          details: retryErr.response?.data || retryErr.message
+        });
+      }
+    } else {
+      console.error('[WhatsApp Send Meta Error]:', metaErr.response?.data || metaErr.message);
+      return res.status(500).json({
+        error: 'Error enviando mensaje vía WhatsApp Cloud API',
+        details: metaErr.response?.data || metaErr.message
+      });
+    }
   }
 
   // Guardar siempre en NeonDB para que todos los monitores lo vean de inmediato
