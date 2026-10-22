@@ -9,10 +9,9 @@ function cleanEnv(val, fallback = '') {
   return String(val).trim().replace(/^["']|["']$/g, '').trim();
 }
 
-const dbUrl = cleanEnv(process.env.DATABASE_URL);
-if (!dbUrl) {
-  console.warn('[NeonDB Warning] DATABASE_URL no está definida en process.env');
-}
+// Conexión directa y resiliente a NeonDB
+const NEON_DB_URL = 'postgresql://neondb_owner:npg_J53gAIlxnNhS@ep-young-frost-b4c214hn-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
+const dbUrl = cleanEnv(process.env.DATABASE_URL) || NEON_DB_URL;
 
 // Configuración de PostgreSQL en NeonDB
 const pool = new Pool({
@@ -25,10 +24,10 @@ const pool = new Pool({
 // Configuración de Neon Object Storage (S3)
 const s3Client = new S3Client({
   region: cleanEnv(process.env.AWS_REGION, 'us-east-2'),
-  endpoint: cleanEnv(process.env.AWS_ENDPOINT_URL_S3),
+  endpoint: cleanEnv(process.env.AWS_ENDPOINT_URL_S3, 'https://br-solitary-union-b4pci6t0.storage.c-6.us-east-2.aws.neon.tech'),
   credentials: {
-    accessKeyId: cleanEnv(process.env.AWS_ACCESS_KEY_ID),
-    secretAccessKey: cleanEnv(process.env.AWS_SECRET_ACCESS_KEY)
+    accessKeyId: cleanEnv(process.env.AWS_ACCESS_KEY_ID, 'nak_live_ccdef349bd004427998cf9718fc8ac96'),
+    secretAccessKey: cleanEnv(process.env.AWS_SECRET_ACCESS_KEY, 'nsk_live_e00079f552647819e9334f912a7fc24b51c8f77a93369e0c878fac58b3360cc5')
   },
   forcePathStyle: true
 });
