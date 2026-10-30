@@ -127,16 +127,6 @@ export default function Layout({ currentView, onNavigate, onLogout, username, ch
               <span className="sidebar-brand-sub">CRM Suite</span>
             </div>
           )}
-          <button
-            className={`sidebar-collapse-btn ${sidebarCollapsed ? 'is-collapsed' : ''}`}
-            onClick={toggleSidebar}
-            title={sidebarCollapsed ? 'Expandir panel lateral' : 'Colapsar panel lateral'}
-            aria-label={sidebarCollapsed ? 'Expandir panel lateral' : 'Colapsar panel lateral'}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-              <path d={sidebarCollapsed ? 'M9 18l6-6-6-6' : 'M15 18l-6-6 6-6'} />
-            </svg>
-          </button>
         </div>
 
         {/* Search */}

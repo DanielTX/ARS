@@ -1,6 +1,14 @@
 // ── MENSAJES VIEW (WhatsApp Inbox style - Full CRM Implementation) ──
 import { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
+import {
+  findPersonaForContact,
+  getStoredPersonas,
+  saveStoredPersonas,
+  getTratosForPersona,
+  getStoredTratos,
+  saveStoredTratos
+} from '../data/crmData';
 
 // Vendedores disponibles en el CRM
 const VENDEDORES_CRM = [
@@ -113,6 +121,46 @@ export default function Mensajes() {
   const [etiquetasDropdownOpen, setEtiquetasDropdownOpen] = useState(false);
   const [menuTresPuntosOpen, setMenuTresPuntosOpen] = useState(false);
   const [submenuEtiquetasOpen, setSubmenuEtiquetasOpen] = useState(false);
+  const [listHeaderMenuOpen, setListHeaderMenuOpen] = useState(false);
+
+  // Modo de selección de chats
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedChatIds, setSelectedChatIds] = useState([]);
+
+  // Paneles laterales derechos: 'info' | 'detalles' | null
+  const [rightPanel, setRightPanel] = useState(null);
+  const contactInfoOpen = rightPanel === 'info';
+  const detallesOpen = rightPanel === 'detalles';
+  const setContactInfoOpen = (val) => {
+    if (typeof val === 'function') {
+      setRightPanel(prev => val(prev === 'info') ? 'info' : null);
+    } else {
+      setRightPanel(val ? 'info' : null);
+    }
+  };
+  const [contactSubView, setContactSubView] = useState('main'); // 'main' | 'archivos'
+  const [contactFilesTab, setContactFilesTab] = useState('multimedia'); // 'multimedia' | 'documentos' | 'enlaces'
+
+  // Modales de integración CRM (Personas y Tratos)
+  const [editDetallesModalOpen, setEditDetallesModalOpen] = useState(false);
+  const [crearTratoModalOpen, setCrearTratoModalOpen] = useState(false);
+  const [personaEditForm, setPersonaEditForm] = useState({ cargo: '', email: '', telefono: '', empresa: '', pais: '' });
+  const [nuevoTratoForm, setNuevoTratoForm] = useState({ title: '', valor: '', etapa: 'Negociación', prob: '50%', cierre: '30/11/2026' });
+
+  // Menú contextual y chevron de mensaje
+  const [messageContextMenu, setMessageContextMenu] = useState({ visible: false, x: 0, y: 0, message: null });
+  const [messageInfoModal, setMessageInfoModal] = useState({ open: false, message: null });
+
+  // Mensaje flotante de notificación (Toast)
+  const [toastMessage, setToastMessage] = useState('');
+  const toastTimeoutRef = useRef(null);
+  const showToast = (text) => {
+    setToastMessage(text);
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    toastTimeoutRef.current = setTimeout(() => {
+      setToastMessage('');
+    }, 2400);
+  };
 
   // Estados de búsqueda dentro del chat
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
@@ -150,8 +198,10 @@ export default function Mensajes() {
   const dropdownRefVendedor = useRef(null);
   const dropdownRefEtiquetas = useRef(null);
   const dropdownRefTresPuntos = useRef(null);
+  const listHeaderMenuRef = useRef(null);
+  const contextMenuRef = useRef(null);
 
-  // Cerrar dropdowns y emoji picker al hacer click afuera
+  // Cerrar dropdowns, context menu y emoji picker al hacer click afuera
   useEffect(() => {
     function handleClickOutside(e) {
       if (dropdownRefVendedor.current && !dropdownRefVendedor.current.contains(e.target)) {
@@ -163,6 +213,12 @@ export default function Mensajes() {
       if (dropdownRefTresPuntos.current && !dropdownRefTresPuntos.current.contains(e.target)) {
         setMenuTresPuntosOpen(false);
         setSubmenuEtiquetasOpen(false);
+      }
+      if (listHeaderMenuRef.current && !listHeaderMenuRef.current.contains(e.target)) {
+        setListHeaderMenuOpen(false);
+      }
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target)) {
+        setMessageContextMenu({ visible: false, x: 0, y: 0, message: null });
       }
       if (emojiPickerRef.current && !emojiPickerRef.current.contains(e.target)) {
         setEmojiPickerOpen(false);
@@ -196,11 +252,211 @@ export default function Mensajes() {
 
   // Seleccionar un chat y marcarlo como leído inmediatamente
   const handleSelectChat = (chatId) => {
+    if (selectionMode) {
+      setSelectedChatIds(prev => 
+        prev.includes(chatId) ? prev.filter(id => id !== chatId) : [...prev, chatId]
+      );
+      return;
+    }
     setSelectedId(chatId);
     try {
       localStorage.setItem('ap_selected_chat', String(chatId));
     } catch {}
     markAsRead(chatId);
+  };
+
+  // Abrir menú contextual de mensaje
+  const openMessageMenu = (msg, clientX, clientY) => {
+    const x = Math.max(12, Math.min(clientX, window.innerWidth - 220));
+    const y = Math.max(12, Math.min(clientY, window.innerHeight - 280));
+    setMessageContextMenu({ visible: true, x, y, message: msg });
+  };
+
+  // Copiar texto o enlace de un mensaje
+  const handleCopiarMensaje = (msg) => {
+    const textToCopy = msg.text || msg.mediaUrl || '';
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(textToCopy);
+    }
+    showToast('Mensaje copiado al portapapeles');
+    setMessageContextMenu({ visible: false, x: 0, y: 0, message: null });
+  };
+
+  // Fijar / Desfijar mensaje dentro del chat
+  const handleFijarMensaje = (msg) => {
+    const newPinned = !msg.pinned;
+    setConversaciones(prev => prev.map(c => {
+      if (c.id !== selectedId) return c;
+      return {
+        ...c,
+        messages: (c.messages || []).map(m => m.id === msg.id ? { ...m, pinned: newPinned } : m)
+      };
+    }));
+    const token = localStorage.getItem('ap_token');
+    if (token && msg.id) {
+      axios.post('/api/whatsapp/message-meta', { messageId: msg.id, fields: { pinned: newPinned } }, {
+        headers: { Authorization: `Bearer ${token}` }
+      }).catch(() => {});
+    }
+    showToast(newPinned ? '📌 Mensaje fijado en el chat' : 'Mensaje desfijado');
+    setMessageContextMenu({ visible: false, x: 0, y: 0, message: null });
+  };
+
+  // Destacar / Quitar de destacados un mensaje
+  const handleDestacarMensaje = (msg) => {
+    const newDestacado = !msg.destacado;
+    setConversaciones(prev => prev.map(c => {
+      if (c.id !== selectedId) return c;
+      return {
+        ...c,
+        messages: (c.messages || []).map(m => m.id === msg.id ? { ...m, destacado: newDestacado } : m)
+      };
+    }));
+    const token = localStorage.getItem('ap_token');
+    if (token && msg.id) {
+      axios.post('/api/whatsapp/message-meta', { messageId: msg.id, fields: { destacado: newDestacado } }, {
+        headers: { Authorization: `Bearer ${token}` }
+      }).catch(() => {});
+    }
+    showToast(newDestacado ? '⭐ Mensaje destacado' : 'Mensaje quitado de destacados');
+    setMessageContextMenu({ visible: false, x: 0, y: 0, message: null });
+  };
+
+  // Descargar archivo o imagen adjunta
+  const handleDescargarAdjunto = (msg) => {
+    if (!msg.mediaUrl) return;
+    const a = document.createElement('a');
+    a.href = msg.mediaUrl;
+    a.download = msg.mediaFilename || (msg.mediaType === 'image' ? 'imagen_whatsapp.jpg' : 'archivo_whatsapp');
+    a.target = '_blank';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToast('Descargando archivo adjunto...');
+    setMessageContextMenu({ visible: false, x: 0, y: 0, message: null });
+  };
+
+  // Eliminar un mensaje del chat
+  const handleEliminarMensaje = (msg) => {
+    if (!window.confirm('¿Deseas eliminar este mensaje?')) return;
+    setConversaciones(prev => prev.map(c => {
+      if (c.id !== selectedId) return c;
+      return {
+        ...c,
+        messages: (c.messages || []).filter(m => m.id !== msg.id)
+      };
+    }));
+    const token = localStorage.getItem('ap_token');
+    if (token && msg.id) {
+      axios.post('/api/whatsapp/message-delete', { messageId: msg.id }, {
+        headers: { Authorization: `Bearer ${token}` }
+      }).catch(() => {});
+    }
+    showToast('Mensaje eliminado');
+    setMessageContextMenu({ visible: false, x: 0, y: 0, message: null });
+  };
+
+  // Alternar chat en Favoritos
+  const handleToggleFavoritoChat = () => {
+    if (!activeChat) return;
+    const newFav = !activeChat.favorito;
+    setConversaciones(prev => prev.map(c => c.id === activeChat.id ? { ...c, favorito: newFav } : c));
+    saveChatMeta(activeChat.id, { favorito: newFav });
+    showToast(newFav ? '⭐ Añadido a favoritos' : 'Quitado de favoritos');
+  };
+
+  // Exportar chat completo a .txt
+  const handleExportarChat = () => {
+    if (!activeChat) return;
+    const lines = [
+      `=====================================================`,
+      `HISTORIAL DE CONVERSACIÓN DE WHATSAPP`,
+      `Contacto: ${activeChat.nombre}`,
+      `Número: ${activeChat.numero}`,
+      `Exportado: ${new Date().toLocaleString('es-PE')}`,
+      `=====================================================\n`
+    ];
+    (activeChat.messages || []).forEach(m => {
+      const sender = m.from === 'me' ? (m.vendedor || 'Tú') : activeChat.nombre;
+      const time = m.time || '';
+      const content = m.text || (m.mediaUrl ? `[Adjunto: ${m.mediaFilename || m.mediaType}] (${m.mediaUrl})` : '');
+      lines.push(`[${time}] ${sender}: ${content}`);
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Chat_${activeChat.nombre.replace(/[^a-zA-Z0-9_-]/g, '_')}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('Chat exportado en archivo .txt');
+  };
+
+  // Vaciar mensajes del chat (conservando el chat)
+  const handleVaciarChat = () => {
+    if (!activeChat) return;
+    if (!window.confirm(`¿Estás seguro de vaciar todos los mensajes con "${activeChat.nombre}"? Los mensajes se borrarán, pero el contacto permanecerá.`)) return;
+    setConversaciones(prev => prev.map(c => c.id === activeChat.id ? { ...c, messages: [], preview: '' } : c));
+    const token = localStorage.getItem('ap_token');
+    if (token) {
+      axios.post('/api/whatsapp/chat-clear', { chatId: activeChat.id }, {
+        headers: { Authorization: `Bearer ${token}` }
+      }).catch(() => {});
+    }
+    showToast('Mensajes del chat vaciados');
+  };
+
+  // Eliminar chat por completo (mensajes y conversación)
+  const handleEliminarChat = () => {
+    if (!activeChat) return;
+    if (!window.confirm(`¿Estás seguro de ELIMINAR por completo el chat con "${activeChat.nombre}" y todos sus mensajes? Esta acción no se puede deshacer.`)) return;
+    const chatIdToDelete = activeChat.id;
+    setConversaciones(prev => prev.filter(c => c.id !== chatIdToDelete));
+    setSelectedId(null);
+    setContactInfoOpen(false);
+    try { localStorage.removeItem('ap_selected_chat'); } catch {}
+    const token = localStorage.getItem('ap_token');
+    if (token) {
+      axios.post('/api/whatsapp/chat-delete', { chatId: chatIdToDelete }, {
+        headers: { Authorization: `Bearer ${token}` }
+      }).catch(() => {});
+    }
+    showToast('Chat eliminado por completo');
+  };
+
+  // Marcar todos los chats como leídos
+  const handleMarcarTodoLeido = () => {
+    setConversaciones(prev => prev.map(c => ({ ...c, unread: 0 })));
+    conversaciones.forEach(c => {
+      if (c.unread > 0) markAsRead(c.id);
+    });
+    setListHeaderMenuOpen(false);
+    showToast('Todos los chats marcados como leídos');
+  };
+
+  // Eliminar chats seleccionados en modo selección
+  const handleEliminarChatsSeleccionados = () => {
+    if (selectedChatIds.length === 0) return;
+    if (!window.confirm(`¿Eliminar los ${selectedChatIds.length} chats seleccionados?`)) return;
+    const idsToDelete = [...selectedChatIds];
+    setConversaciones(prev => prev.filter(c => !idsToDelete.includes(c.id)));
+    if (idsToDelete.includes(selectedId)) {
+      setSelectedId(null);
+      try { localStorage.removeItem('ap_selected_chat'); } catch {}
+    }
+    setSelectedChatIds([]);
+    setSelectionMode(false);
+    const token = localStorage.getItem('ap_token');
+    if (token) {
+      idsToDelete.forEach(id => {
+        axios.post('/api/whatsapp/chat-delete', { chatId: id }, {
+          headers: { Authorization: `Bearer ${token}` }
+        }).catch(() => {});
+      });
+    }
+    showToast(`${idsToDelete.length} chats eliminados`);
   };
 
   // Sincronizar mensajes en tiempo real desde NeonDB
@@ -248,6 +504,78 @@ export default function Mensajes() {
   }, []);
 
   const activeChat = conversaciones.find(c => c.id === selectedId) || null;
+
+  // Persona y tratos vinculados a la conversación activa
+  const [crmPersonasVersion, setCrmPersonasVersion] = useState(0);
+  const [crmTratosVersion, setCrmTratosVersion] = useState(0);
+
+  useEffect(() => {
+    const onPUpdate = () => setCrmPersonasVersion(v => v + 1);
+    const onTUpdate = () => setCrmTratosVersion(v => v + 1);
+    window.addEventListener('crm_personas_updated', onPUpdate);
+    window.addEventListener('crm_tratos_updated', onTUpdate);
+    return () => {
+      window.removeEventListener('crm_personas_updated', onPUpdate);
+      window.removeEventListener('crm_tratos_updated', onTUpdate);
+    };
+  }, []);
+
+  const linkedPersona = activeChat ? findPersonaForContact(activeChat.nombre, activeChat.numero) : null;
+  const linkedTratos = activeChat ? getTratosForPersona(activeChat.nombre) : [];
+
+  const handleOpenEditPersona = () => {
+    if (!linkedPersona) return;
+    setPersonaEditForm({
+      cargo: linkedPersona.cargo || '',
+      email: linkedPersona.email || '',
+      telefono: linkedPersona.telefono || activeChat?.numero || '',
+      empresa: linkedPersona.empresa || '',
+      pais: linkedPersona.pais || 'Perú'
+    });
+    setEditDetallesModalOpen(true);
+  };
+
+  const handleSavePersona = (e) => {
+    e.preventDefault();
+    if (!linkedPersona) return;
+    const all = getStoredPersonas();
+    const idx = all.findIndex(p => p.id === linkedPersona.id || p.nombre.toLowerCase() === linkedPersona.nombre.toLowerCase());
+    const updated = {
+      ...linkedPersona,
+      ...personaEditForm
+    };
+    let newList;
+    if (idx >= 0) {
+      newList = [...all];
+      newList[idx] = updated;
+    } else {
+      newList = [updated, ...all];
+    }
+    saveStoredPersonas(newList);
+    setEditDetallesModalOpen(false);
+    showToast('Detalles guardados y sincronizados con Personas');
+  };
+
+  const handleSaveNuevoTrato = (e) => {
+    e.preventDefault();
+    if (!activeChat) return;
+    const allTratos = getStoredTratos();
+    const newTrato = {
+      id: Date.now(),
+      title: nuevoTratoForm.title || `${activeChat.nombre} — Nuevo Trato`,
+      valor: nuevoTratoForm.valor || 'USD 1.500',
+      etapa: nuevoTratoForm.etapa || 'Negociación',
+      prob: nuevoTratoForm.prob || '50%',
+      cierre: nuevoTratoForm.cierre || '30/11/2026',
+      resp: activeChat.vendedores[0] || 'Marcos Ferreyra',
+      empresa: linkedPersona?.empresa || 'Andex Trading Co.',
+      persona: activeChat.nombre
+    };
+    saveStoredTratos([newTrato, ...allTratos]);
+    setCrearTratoModalOpen(false);
+    setNuevoTratoForm({ title: '', valor: '', etapa: 'Negociación', prob: '50%', cierre: '30/11/2026' });
+    showToast('Trato creado y sincronizado con Tratos');
+  };
 
   // Mantener el scroll en el último mensaje enviado/recibido al recargar o cambiar de chat
   useEffect(() => {
@@ -600,6 +928,24 @@ export default function Mensajes() {
     return m.text.toLowerCase().includes(chatSearchQuery.toLowerCase().trim());
   }) : [];
 
+  // Listas de archivos, documentos y enlaces para el panel de Info. del contacto
+  const mediaList = activeChat?.messages ? activeChat.messages.filter(m => m.mediaType === 'image' && m.mediaUrl) : [];
+  const docsList = activeChat?.messages ? activeChat.messages.filter(m => m.mediaType === 'document' && m.mediaUrl) : [];
+  const linksList = [];
+  if (activeChat?.messages) {
+    activeChat.messages.forEach(m => {
+      if (m.text) {
+        const urls = m.text.match(/(https?:\/\/[^\s]+)/g);
+        if (urls) {
+          urls.forEach(u => linksList.push({ url: u, time: m.time }));
+        }
+      }
+    });
+  }
+  const totalArchivosCount = mediaList.length + docsList.length + linksList.length;
+  const lastThreeMedia = mediaList.slice(-3).reverse();
+  const starredMessages = activeChat?.messages ? activeChat.messages.filter(m => m.destacado) : [];
+
   return (
     <div className="mensajes-layout">
       {/* ── COLUMNA IZQUIERDA: LISTA DE CHATS Y FILTROS ── */}
@@ -617,7 +963,65 @@ export default function Mensajes() {
               <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#25d366' }} />
               WhatsApp ▾
             </div>
-            <button style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', padding: '4px' }} title="Opciones">⋯</button>
+            
+            {/* Botón de 3 puntos con menú desplegable (MB Suite) */}
+            <div className="filter-dropdown-wrap" ref={listHeaderMenuRef} style={{ position: 'relative' }}>
+              <button
+                className="topbar-icon-btn"
+                style={{ width: '28px', height: '28px', padding: '0', background: listHeaderMenuOpen ? 'var(--surface2)' : 'transparent' }}
+                title="Opciones de mensajes"
+                onClick={() => setListHeaderMenuOpen(o => !o)}
+              >
+                ⋯
+              </button>
+              {listHeaderMenuOpen && (
+                <div className="list-header-dropdown">
+                  <button
+                    className="dropdown-item"
+                    onClick={() => {
+                      setListHeaderMenuOpen(false);
+                      setSelectionMode(prev => !prev);
+                      setSelectedChatIds([]);
+                    }}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="18" height="18" rx="2"/><path d="m9 12 2 2 4-4"/>
+                    </svg>
+                    {selectionMode ? 'Cancelar selección' : 'Seleccionar chats'}
+                  </button>
+                  <button className="dropdown-item" onClick={handleMarcarTodoLeido}>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M18 6 7 17l-5-5"/><path d="m22 10-7.5 7.5L13 16"/>
+                    </svg>
+                    Marcar todo como leído
+                  </button>
+                  <button
+                    className="dropdown-item"
+                    onClick={() => {
+                      setListHeaderMenuOpen(false);
+                      setPlantillasModalOpen(true);
+                    }}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+                    </svg>
+                    Gestionar plantillas
+                  </button>
+                  <button
+                    className="dropdown-item"
+                    onClick={() => {
+                      setListHeaderMenuOpen(false);
+                      setGestionarModalOpen(true);
+                    }}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z"/><circle cx="7" cy="7" r=".5" fill="currentColor"/>
+                    </svg>
+                    Gestionar etiquetas
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -853,6 +1257,29 @@ export default function Mensajes() {
           </div>
         </div>
 
+        {/* Barra de acción cuando el modo de selección de chats está activo */}
+        {selectionMode && (
+          <div className="selection-mode-bar">
+            <span>{selectedChatIds.length} seleccionados</span>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button
+                className="btn-danger-mini"
+                disabled={selectedChatIds.length === 0}
+                onClick={handleEliminarChatsSeleccionados}
+                title="Eliminar chats seleccionados"
+              >
+                Eliminar ({selectedChatIds.length})
+              </button>
+              <button
+                className="btn-secondary-mini"
+                onClick={() => { setSelectionMode(false); setSelectedChatIds([]); }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Lista de conversaciones */}
         <div className="conv-list">
           {filteredConversaciones.length === 0 ? (
@@ -873,6 +1300,17 @@ export default function Mensajes() {
                   className={`conv-item ${selectedId === c.id ? 'conv-selected' : ''}`}
                   onClick={() => handleSelectChat(c.id)}
                 >
+                  {/* Checkbox para modo selección */}
+                  {selectionMode && (
+                    <input
+                      type="checkbox"
+                      checked={selectedChatIds.includes(c.id)}
+                      onChange={() => handleSelectChat(c.id)}
+                      onClick={e => e.stopPropagation()}
+                      style={{ marginRight: '6px', cursor: 'pointer', accentColor: 'var(--accent)', alignSelf: 'center' }}
+                    />
+                  )}
+
                   {/* Avatar de contacto */}
                   <div className="conv-avatar" style={{ background: getAvatarColor(c.id), position: 'relative' }}>
                     {c.initials}
@@ -888,6 +1326,7 @@ export default function Mensajes() {
                     <div className="conv-top">
                       <span className="conv-name" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                         {c.nombre}
+                        {c.favorito && <span style={{ fontSize: '11px', color: '#fbbf24' }} title="Favorito">⭐</span>}
                         {c.silenciado && <span style={{ fontSize: '11px', opacity: 0.7 }} title="Silenciado">🔕</span>}
                         {c.cerrado && <span style={{ fontSize: '9px', background: 'rgba(255,255,255,0.1)', color: 'var(--muted)', padding: '1px 4px', borderRadius: '4px' }}>Cerrado</span>}
                       </span>
@@ -954,7 +1393,11 @@ export default function Mensajes() {
           <>
             {/* Header del chat */}
             <div className="chat-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div
+                className="chat-header-contact-clickable"
+                onClick={() => setContactInfoOpen(o => !o)}
+                title="Ver Info. del contacto"
+              >
                 <div className="conv-avatar" style={{ width: '40px', height: '40px', fontSize: '14px', background: getAvatarColor(activeChat.id), position: 'relative' }}>
                   {activeChat.initials}
                   {activeChat.fijado && <span style={{ position: 'absolute', bottom: '-2px', right: '-2px', fontSize: '10px' }}>📌</span>}
@@ -962,6 +1405,7 @@ export default function Mensajes() {
                 <div>
                   <div style={{ fontWeight: 700, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                     {activeChat.nombre}
+                    {activeChat.favorito && <span style={{ fontSize: '12px', color: '#fbbf24' }} title="Favorito">⭐</span>}
                     {activeChat.silenciado && <span style={{ fontSize: '12px', opacity: 0.7 }} title="Silenciado">🔕</span>}
                     {activeChat.cerrado && <span style={{ fontSize: '10px', background: 'rgba(255,255,255,0.1)', color: 'var(--muted)', padding: '1px 6px', borderRadius: '4px' }}>Cerrada</span>}
                   </div>
@@ -1041,11 +1485,8 @@ export default function Mensajes() {
                         <span>{activeChat.unread > 0 ? 'Marcar como leído' : 'Marcar como no leído'}</span>
                       </button>
 
-                      {/* 3. Etiquetar chat (con submenú interactivo) */}
-                      <div
-                        className="menu-submenu-wrap"
-                        onMouseEnter={() => setSubmenuEtiquetasOpen(true)}
-                      >
+                      {/* 3. Etiquetar chat (con submenú interactivo al hacer clic) */}
+                      <div className="menu-submenu-wrap">
                         <button
                           className="dropdown-item"
                           onClick={() => setSubmenuEtiquetasOpen(o => !o)}
@@ -1191,6 +1632,19 @@ export default function Mensajes() {
                 </div>
               ) : (
                 <>
+                  {/* Banner de mensaje fijado (si existe alguno) */}
+                  {activeChat.messages?.some(m => m.pinned) && (
+                    <div className="pinned-message-bar">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+                        <span style={{ fontSize: '13px' }}>📌</span>
+                        <div style={{ fontSize: '12px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {activeChat.messages.find(m => m.pinned)?.text || 'Mensaje fijado'}
+                        </div>
+                      </div>
+                      <span style={{ fontSize: '11px', color: 'var(--muted)', flexShrink: 0 }}>Fijado</span>
+                    </div>
+                  )}
+
                   <div className="chat-date-divider">{activeChat.fecha === 'Hoy' ? 'Hoy' : '20 de junio de 2026'}</div>
 
                   {displayMessages.map(m => {
@@ -1204,7 +1658,28 @@ export default function Mensajes() {
 
                     return (
                       <div key={m.id} className={`chat-bubble-wrap ${m.from === 'me' ? 'from-me' : 'from-them'}`}>
-                        <div className={`chat-bubble ${m.from === 'me' ? 'bubble-me' : 'bubble-them'}`}>
+                        <div
+                          className={`chat-bubble ${m.from === 'me' ? 'bubble-me' : 'bubble-them'}`}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            openMessageMenu(m, e.clientX, e.clientY);
+                          }}
+                        >
+                          {/* Botón de mayor/menor (Chevron WhatsApp) en la esquina superior derecha al pasar el mouse */}
+                          <button
+                            className="bubble-chevron-btn"
+                            title="Opciones del mensaje"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              openMessageMenu(m, rect.left, rect.bottom + 4);
+                            }}
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="6 9 12 15 18 9"/>
+                            </svg>
+                          </button>
+
                           {m.vendedor && (
                             <div style={{ fontSize: '10px', opacity: 0.8, marginBottom: '2px', fontWeight: 600 }}>
                               {m.vendedor}
@@ -1270,7 +1745,11 @@ export default function Mensajes() {
                             }
                             return <div style={{ marginTop: m.mediaUrl ? '6px' : 0 }}>{m.text}</div>;
                           })()}
-                          <span className="bubble-time">{m.time}</span>
+                          <span className="bubble-time">
+                            {m.pinned && <span style={{ marginRight: '3px', fontSize: '10px' }} title="Fijado">📌</span>}
+                            {m.destacado && <span style={{ marginRight: '3px', fontSize: '10px', color: '#fbbf24' }} title="Destacado">⭐</span>}
+                            {m.time}
+                          </span>
                         </div>
                       </div>
                     );
@@ -1387,6 +1866,593 @@ export default function Mensajes() {
           </div>
         )}
       </div>
+
+      {/* ── PANEL DERECHO: INFO. DEL CONTACTO (WhatsApp Web & MB Suite CRM) ── */}
+      {contactInfoOpen && activeChat && (
+        <div className="contact-info-panel">
+          {contactSubView === 'main' ? (
+            <>
+              {/* Header principal */}
+              <div className="contact-panel-header" style={{ justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                  <button
+                    className="contact-panel-close-btn"
+                    onClick={() => setContactInfoOpen(false)}
+                    title="Cerrar info del contacto"
+                  >
+                    ✕
+                  </button>
+                  <span className="contact-panel-title">Info. del contacto</span>
+                </div>
+
+                {/* Botón Detalles dentro de la barra lateral al lado de Info. del contacto */}
+                <button
+                  className="contact-panel-detalles-btn"
+                  onClick={() => setRightPanel('detalles')}
+                  title="Ver Detalles"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/>
+                  </svg>
+                  <span>Detalles</span>
+                </button>
+              </div>
+
+              <div className="contact-panel-scroll">
+                {/* 1. Foto, Nombre y Teléfono */}
+                <div className="contact-panel-profile">
+                  <div
+                    className="contact-panel-avatar"
+                    style={{ background: getAvatarColor(activeChat.id) }}
+                  >
+                    {activeChat.initials}
+                  </div>
+                  <div className="contact-panel-name">{activeChat.nombre}</div>
+                  <div className="contact-panel-phone">{activeChat.numero}</div>
+                  {activeChat.vendedores.length > 0 && (
+                    <div className="contact-panel-vendor">
+                      <span>👤 {activeChat.vendedores.join(', ')}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="contact-panel-divider" />
+
+                {/* 6. BOTÓN: ARCHIVOS, ENLACES Y DOCUMENTOS (Con vista previa de los últimos 3 multimedia abajo) */}
+                <div className="contact-panel-section">
+                  <button
+                    className="contact-panel-nav-btn"
+                    onClick={() => setContactSubView('archivos')}
+                    title="Ver todos los archivos, enlaces y documentos"
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                      </svg>
+                      <span style={{ fontWeight: 600, fontSize: '13px' }}>Archivos, enlaces y documentos</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span className="contact-badge">{totalArchivosCount}</span>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="9 18 15 12 9 6"/>
+                      </svg>
+                    </div>
+                  </button>
+
+                  {/* Vista previa predeterminada de los últimos 3 multimedia enviados */}
+                  <div className="contact-preview-three-row">
+                    {lastThreeMedia.length > 0 ? (
+                      lastThreeMedia.map((m, idx) => (
+                        <div
+                          key={idx}
+                          className="contact-preview-three-item"
+                          onClick={() => setContactSubView('archivos')}
+                          title="Haga clic para ver en multimedia"
+                        >
+                          <img src={m.mediaUrl} alt="Multimedia reciente" />
+                        </div>
+                      ))
+                    ) : (
+                      <>
+                        <div className="contact-preview-three-placeholder" onClick={() => setContactSubView('archivos')}>
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+                        </div>
+                        <div className="contact-preview-three-placeholder" onClick={() => setContactSubView('archivos')}>
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+                        </div>
+                        <div className="contact-preview-three-placeholder" onClick={() => setContactSubView('archivos')}>
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="contact-panel-divider" />
+
+                {/* 7. MENSAJES DESTACADOS (Icono SVG elegante) */}
+                <div className="contact-panel-section">
+                  <div className="contact-panel-section-title">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                      </svg>
+                      <span>Mensajes destacados</span>
+                    </div>
+                    <span className="contact-badge">{starredMessages.length}</span>
+                  </div>
+                  {starredMessages.length > 0 ? (
+                    <div className="contact-starred-list">
+                      {starredMessages.map(sm => (
+                        <div key={sm.id} className="contact-starred-item">
+                          <div className="contact-starred-text">
+                            {sm.text || (sm.mediaUrl ? `[${sm.mediaFilename || sm.mediaType || 'Archivo'}]` : '')}
+                          </div>
+                          <div className="contact-starred-meta">
+                            <span>{sm.time} · {sm.from === 'me' ? 'Tú' : activeChat.nombre}</span>
+                            <button
+                              onClick={() => handleDestacarMensaje(sm)}
+                              className="contact-unstar-btn"
+                              title="Quitar de destacados"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="contact-empty">No hay mensajes destacados</div>
+                  )}
+                </div>
+
+                <div className="contact-panel-divider" />
+
+                {/* 8. ACCIONES FINALES DEL CONTACTO (Iconos SVG elegantes - sin emojis) */}
+                <div className="contact-panel-actions">
+                  <button className="contact-action-btn" onClick={handleToggleFavoritoChat}>
+                    <svg className="contact-action-svg" width="16" height="16" viewBox="0 0 24 24" fill={activeChat.favorito ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                    </svg>
+                    <span>{activeChat.favorito ? 'Quitar de favoritos' : 'Añadir a favoritos'}</span>
+                  </button>
+
+                  <button className="contact-action-btn" onClick={handleExportarChat}>
+                    <svg className="contact-action-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    <span>Exportar chat</span>
+                  </button>
+
+                  <button className="contact-action-btn warning" onClick={handleVaciarChat}>
+                    <svg className="contact-action-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>
+                    </svg>
+                    <span>Vaciar chat</span>
+                  </button>
+
+                  <button className="contact-action-btn danger" onClick={handleEliminarChat}>
+                    <svg className="contact-action-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                    <span>Eliminar chat</span>
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : (
+            /* ── SUB-APARTADO: ARCHIVOS, ENLACES Y DOCUMENTOS (Con navegación atrás) ── */
+            <>
+              <div className="contact-panel-header">
+                <button
+                  className="contact-panel-back-btn"
+                  onClick={() => setContactSubView('main')}
+                  title="Volver a Info. del contacto"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
+                  </svg>
+                </button>
+                <span className="contact-panel-title">Archivos, enlaces y docs.</span>
+              </div>
+
+              {/* Pestañas superiores para filtrar */}
+              <div className="contact-subpanel-tabs">
+                <button
+                  className={`contact-subpanel-tab ${contactFilesTab === 'multimedia' ? 'active' : ''}`}
+                  onClick={() => setContactFilesTab('multimedia')}
+                >
+                  Archivos multimedia
+                </button>
+                <button
+                  className={`contact-subpanel-tab ${contactFilesTab === 'documentos' ? 'active' : ''}`}
+                  onClick={() => setContactFilesTab('documentos')}
+                >
+                  Documentos
+                </button>
+                <button
+                  className={`contact-subpanel-tab ${contactFilesTab === 'enlaces' ? 'active' : ''}`}
+                  onClick={() => setContactFilesTab('enlaces')}
+                >
+                  Enlaces
+                </button>
+              </div>
+
+              <div className="contact-panel-scroll" style={{ padding: '16px' }}>
+                {contactFilesTab === 'multimedia' && (
+                  mediaList.length > 0 ? (
+                    <div>
+                      <div className="contact-media-subheading">ESTE MES</div>
+                      <div className="contact-media-grid">
+                        {mediaList.map((m, idx) => (
+                          <a key={idx} href={m.mediaUrl} target="_blank" rel="noreferrer" className="contact-media-thumb" title="Ver imagen">
+                            <img src={m.mediaUrl} alt="Multimedia" />
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="contact-empty" style={{ paddingTop: '60px' }}>
+                      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ opacity: 0.35, marginBottom: '8px' }}>
+                        <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>
+                      </svg>
+                      <div>No hay archivos multimedia compartidos</div>
+                    </div>
+                  )
+                )}
+
+                {contactFilesTab === 'documentos' && (
+                  docsList.length > 0 ? (
+                    <div className="contact-docs-list">
+                      {docsList.map((d, idx) => (
+                        <a key={idx} href={d.mediaUrl} target="_blank" rel="noreferrer" className="contact-doc-item" title="Descargar documento">
+                          <span className="contact-doc-icon">📄</span>
+                          <div className="contact-doc-info">
+                            <span className="contact-doc-name">{d.mediaFilename || 'Documento adjunto'}</span>
+                            <span className="contact-doc-date">{d.time}</span>
+                          </div>
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        </a>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="contact-empty" style={{ paddingTop: '60px' }}>
+                      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ opacity: 0.35, marginBottom: '8px' }}>
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                      </svg>
+                      <div>No hay documentos compartidos</div>
+                    </div>
+                  )
+                )}
+
+                {contactFilesTab === 'enlaces' && (
+                  linksList.length > 0 ? (
+                    <div className="contact-links-list">
+                      {linksList.map((l, idx) => (
+                        <a key={idx} href={l.url} target="_blank" rel="noreferrer" className="contact-link-item" title="Abrir enlace">
+                          <span className="contact-link-icon">🔗</span>
+                          <div className="contact-link-info">
+                            <span className="contact-link-url">{l.url}</span>
+                            <span className="contact-link-time">{l.time}</span>
+                          </div>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>
+                        </a>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="contact-empty" style={{ paddingTop: '60px' }}>
+                      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ opacity: 0.35, marginBottom: '8px' }}>
+                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                      </svg>
+                      <div>No hay enlaces compartidos</div>
+                    </div>
+                  )
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── PANEL DERECHO: DETALLES (Detalles, Responsable, Tratos y Actividad) ── */}
+      {rightPanel === 'detalles' && activeChat && (
+        <div className="contact-info-panel">
+          <div className="contact-panel-header">
+            <button
+              className="contact-panel-back-btn"
+              onClick={() => setRightPanel('info')}
+              title="Volver a Info. del contacto"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
+              </svg>
+            </button>
+            <span className="contact-panel-title">Detalles</span>
+          </div>
+
+          <div className="contact-panel-scroll">
+            {/* 1. RECUADRO: DETALLES (Conectado con la tabla de PERSONAS) */}
+            <div className="contact-panel-section">
+              <div className="contact-panel-section-title">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+                  </svg>
+                  <span>Detalles</span>
+                </div>
+                <button
+                  className="contact-card-action-btn"
+                  onClick={handleOpenEditPersona}
+                  title="Editar detalles del contacto"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+                  </svg>
+                  <span>Editar</span>
+                </button>
+              </div>
+
+              <div className="contact-details-box">
+                <div className="contact-detail-row">
+                  <span className="contact-detail-label">Cargo / Rol:</span>
+                  <span className="contact-detail-val">{linkedPersona?.cargo || 'Gerente Comercial'}</span>
+                </div>
+                <div className="contact-detail-row">
+                  <span className="contact-detail-label">Email:</span>
+                  <span className="contact-detail-val">{linkedPersona?.email || '—'}</span>
+                </div>
+                <div className="contact-detail-row">
+                  <span className="contact-detail-label">Teléfono:</span>
+                  <span className="contact-detail-val">{linkedPersona?.telefono || activeChat.numero}</span>
+                </div>
+                <div className="contact-detail-row">
+                  <span className="contact-detail-label">Empresa:</span>
+                  <span className="contact-detail-val" style={{ color: 'var(--accent)', fontWeight: 600 }}>
+                    {linkedPersona?.empresa || 'Andex Trading Co.'}
+                  </span>
+                </div>
+                <div className="contact-detail-row">
+                  <span className="contact-detail-label">País / Región:</span>
+                  <span className="contact-detail-val">{linkedPersona?.pais || 'Perú'}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="contact-panel-divider" />
+
+            {/* 2. RECUADRO: RESPONSABLE */}
+            <div className="contact-panel-section">
+              <div className="contact-panel-section-title">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="7" r="4"/><path d="M5.5 21a8.5 8.5 0 0 1 13 0"/>
+                  </svg>
+                  <span>Responsable</span>
+                </div>
+              </div>
+              <div className="contact-responsible-card">
+                <div className="contact-responsible-avatar">
+                  {(activeChat.vendedores[0] || 'Marcos Ferreyra').split(' ').map(n => n[0]).join('').slice(0, 2)}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>
+                    {activeChat.vendedores[0] || 'Marcos Ferreyra'}
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                    {(activeChat.vendedores[0] || 'Marcos Ferreyra').toLowerCase().replace(/\s+/g, '.')}@autopost-crm.com
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="contact-panel-divider" />
+
+            {/* 3. RECUADRO: TRATOS (Conectado con la tabla de TRATOS) */}
+            <div className="contact-panel-section">
+              <div className="contact-panel-section-title">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
+                  </svg>
+                  <span>Tratos ({linkedTratos.length})</span>
+                </div>
+                <button
+                  className="contact-card-action-btn"
+                  onClick={() => setCrearTratoModalOpen(true)}
+                  title="Agregar trato a este contacto"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                  </svg>
+                  <span>Crear</span>
+                </button>
+              </div>
+
+              <div className="contact-tratos-list">
+                {linkedTratos.length > 0 ? (
+                  linkedTratos.map(t => (
+                    <div key={t.id} className="contact-trato-card">
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                        <span className="contact-trato-tag">
+                          ● {t.etapa.toUpperCase()}
+                        </span>
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--accent)' }}>
+                          {t.prob || '50%'}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {t.title}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '6px', fontSize: '12px' }}>
+                        <span style={{ fontWeight: 700, color: '#10b981' }}>{t.valor}</span>
+                        <span style={{ fontSize: '10px', color: 'var(--muted)' }}>Cierre: {t.cierre || '30/11/2026'}</span>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="contact-empty">No hay tratos asociados</div>
+                )}
+              </div>
+            </div>
+
+            <div className="contact-panel-divider" />
+
+            {/* 4. RECUADRO: ACTIVIDAD / ÚLTIMA ACTIVIDAD */}
+            <div className="contact-panel-section">
+              <div className="contact-panel-section-title">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+                  </svg>
+                  <span>Actividad</span>
+                </div>
+              </div>
+              <div className="contact-activity-box">
+                <div className="contact-activity-row">
+                  <span style={{ color: 'var(--muted)' }}>Primer contacto:</span>
+                  <span>hace 10 meses (20/06/2026)</span>
+                </div>
+                <div className="contact-activity-row">
+                  <span style={{ color: 'var(--muted)' }}>Última actividad:</span>
+                  <span style={{ color: '#25d366', fontWeight: 500 }}>
+                    {activeChat.messages && activeChat.messages.length > 0
+                      ? `Hoy a las ${activeChat.messages[activeChat.messages.length - 1].time}`
+                      : 'Hoy'}
+                  </span>
+                </div>
+                <div className="contact-activity-row">
+                  <span style={{ color: 'var(--muted)' }}>Canal de origen:</span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#25d366', fontWeight: 600 }}>
+                    <span style={{ fontSize: '10px' }}>●</span> WhatsApp Business API
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MENÚ CONTEXTUAL DE MENSAJE (Clic derecho y Chevron) ── */}
+      {messageContextMenu.visible && messageContextMenu.message && (
+        <div
+          ref={contextMenuRef}
+          className="bubble-context-menu"
+          style={{ top: messageContextMenu.y, left: messageContextMenu.x }}
+        >
+          <button
+            className="context-menu-item"
+            onClick={() => {
+              setMessageInfoModal({ open: true, message: messageContextMenu.message });
+              setMessageContextMenu({ visible: false, x: 0, y: 0, message: null });
+            }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+            </svg>
+            Info. del mensaje
+          </button>
+
+          <button
+            className="context-menu-item"
+            onClick={() => handleCopiarMensaje(messageContextMenu.message)}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+            Copiar
+          </button>
+
+          <button
+            className="context-menu-item"
+            onClick={() => handleFijarMensaje(messageContextMenu.message)}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/>
+            </svg>
+            {messageContextMenu.message.pinned ? 'Desfijar' : 'Fijar'}
+          </button>
+
+          <button
+            className="context-menu-item"
+            onClick={() => handleDestacarMensaje(messageContextMenu.message)}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+            </svg>
+            {messageContextMenu.message.destacado ? 'Quitar de destacados' : 'Destacar'}
+          </button>
+
+          {/* Opción de DESCARGAR exclusivamente para imágenes o documentos */}
+          {(messageContextMenu.message.mediaType === 'image' || messageContextMenu.message.mediaType === 'document' || messageContextMenu.message.mediaUrl) && (
+            <button
+              className="context-menu-item"
+              onClick={() => handleDescargarAdjunto(messageContextMenu.message)}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              Descargar
+            </button>
+          )}
+
+          <div className="dropdown-divider" style={{ margin: '4px 0' }} />
+
+          <button
+            className="context-menu-item danger"
+            onClick={() => handleEliminarMensaje(messageContextMenu.message)}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>
+            Eliminar
+          </button>
+        </div>
+      )}
+
+      {/* ── MODAL: INFO. DEL MENSAJE ── */}
+      {messageInfoModal.open && messageInfoModal.message && (
+        <div className="modal-backdrop" onClick={() => setMessageInfoModal({ open: false, message: null })}>
+          <div className="modal-card" style={{ maxWidth: '420px' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">ℹ️ Info. del mensaje</h3>
+              <button className="modal-close-btn" onClick={() => setMessageInfoModal({ open: false, message: null })}>✕</button>
+            </div>
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div style={{ padding: '12px', background: 'var(--surface2)', borderRadius: '10px', fontSize: '13px' }}>
+                {messageInfoModal.message.text || (messageInfoModal.message.mediaFilename ? `Adjunto: ${messageInfoModal.message.mediaFilename}` : 'Contenido multimedia')}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: '6px' }}>
+                  <span style={{ color: 'var(--muted)' }}>Remitente:</span>
+                  <span style={{ fontWeight: 600 }}>{messageInfoModal.message.from === 'me' ? (messageInfoModal.message.vendedor || 'Tú (CRM)') : activeChat?.nombre}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: '6px' }}>
+                  <span style={{ color: 'var(--muted)' }}>Hora:</span>
+                  <span>{messageInfoModal.message.time}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: '6px' }}>
+                  <span style={{ color: 'var(--muted)' }}>Estado:</span>
+                  <span style={{ color: '#25d366', fontWeight: 600 }}>✓✓ Entregado</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--muted)' }}>Tipo de mensaje:</span>
+                  <span style={{ textTransform: 'capitalize' }}>{messageInfoModal.message.mediaType || 'Texto'}</span>
+                </div>
+              </div>
+              <div className="modal-actions" style={{ marginTop: '10px' }}>
+                <button className="btn-secondary" onClick={() => setMessageInfoModal({ open: false, message: null })}>Cerrar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── TOAST FLOTANTE DE NOTIFICACIÓN ── */}
+      {toastMessage && (
+        <div className="chat-floating-toast">
+          {toastMessage}
+        </div>
+      )}
 
       {/* ── MODAL PLANTILLAS DE WHATSAPP (según captura MB Suite) ── */}
       {plantillasModalOpen && (
@@ -1583,6 +2649,135 @@ export default function Mensajes() {
                 </div>
               </form>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL EDITAR DETALLES DEL CONTACTO (Conectado con Personas) ── */}
+      {editDetallesModalOpen && (
+        <div className="modal-backdrop" onClick={() => setEditDetallesModalOpen(false)}>
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Editar detalles del contacto</h3>
+              <button className="modal-close-btn" onClick={() => setEditDetallesModalOpen(false)}>✕</button>
+            </div>
+            <form onSubmit={handleSavePersona} className="modal-body">
+              <div className="modal-field">
+                <label>Cargo / Rol</label>
+                <input
+                  placeholder="Ej: Gerente Comercial"
+                  value={personaEditForm.cargo}
+                  onChange={e => setPersonaEditForm({ ...personaEditForm, cargo: e.target.value })}
+                />
+              </div>
+              <div className="modal-field">
+                <label>Email</label>
+                <input
+                  type="email"
+                  placeholder="correo@empresa.com"
+                  value={personaEditForm.email}
+                  onChange={e => setPersonaEditForm({ ...personaEditForm, email: e.target.value })}
+                />
+              </div>
+              <div className="modal-field">
+                <label>Teléfono</label>
+                <input
+                  placeholder="+51 900 000 000"
+                  value={personaEditForm.telefono}
+                  onChange={e => setPersonaEditForm({ ...personaEditForm, telefono: e.target.value })}
+                />
+              </div>
+              <div className="modal-field">
+                <label>Empresa</label>
+                <input
+                  placeholder="Nombre de la empresa"
+                  value={personaEditForm.empresa}
+                  onChange={e => setPersonaEditForm({ ...personaEditForm, empresa: e.target.value })}
+                />
+              </div>
+              <div className="modal-field">
+                <label>País / Región</label>
+                <input
+                  placeholder="Perú"
+                  value={personaEditForm.pais}
+                  onChange={e => setPersonaEditForm({ ...personaEditForm, pais: e.target.value })}
+                />
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="btn-secondary" onClick={() => setEditDetallesModalOpen(false)}>Cancelar</button>
+                <button type="submit" className="btn-primary">Guardar cambios</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL CREAR TRATO (Conectado con Tratos) ── */}
+      {crearTratoModalOpen && (
+        <div className="modal-backdrop" onClick={() => setCrearTratoModalOpen(false)}>
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Crear nuevo trato</h3>
+              <button className="modal-close-btn" onClick={() => setCrearTratoModalOpen(false)}>✕</button>
+            </div>
+            <form onSubmit={handleSaveNuevoTrato} className="modal-body">
+              <div className="modal-field">
+                <label>Título del trato</label>
+                <input
+                  required
+                  placeholder={activeChat ? `${activeChat.nombre} — Nuevo Trato` : 'Título del trato'}
+                  value={nuevoTratoForm.title}
+                  onChange={e => setNuevoTratoForm({ ...nuevoTratoForm, title: e.target.value })}
+                />
+              </div>
+              <div className="modal-field">
+                <label>Valor estimado</label>
+                <input
+                  placeholder="Ej: USD 2.500"
+                  value={nuevoTratoForm.valor}
+                  onChange={e => setNuevoTratoForm({ ...nuevoTratoForm, valor: e.target.value })}
+                />
+              </div>
+              <div className="modal-field">
+                <label>Etapa</label>
+                <select
+                  value={nuevoTratoForm.etapa}
+                  onChange={e => setNuevoTratoForm({ ...nuevoTratoForm, etapa: e.target.value })}
+                >
+                  <option>Lead nuevo</option>
+                  <option>Prospecto</option>
+                  <option>Propuesta enviada</option>
+                  <option>Negociación</option>
+                  <option>Cerrado ✓</option>
+                </select>
+              </div>
+              <div className="modal-field">
+                <label>Probabilidad</label>
+                <select
+                  value={nuevoTratoForm.prob}
+                  onChange={e => setNuevoTratoForm({ ...nuevoTratoForm, prob: e.target.value })}
+                >
+                  <option>10%</option>
+                  <option>25%</option>
+                  <option>50%</option>
+                  <option>70%</option>
+                  <option>90%</option>
+                  <option>100%</option>
+                </select>
+              </div>
+              <div className="modal-field">
+                <label>Fecha de cierre estimada</label>
+                <input
+                  placeholder="30/11/2026"
+                  value={nuevoTratoForm.cierre}
+                  onChange={e => setNuevoTratoForm({ ...nuevoTratoForm, cierre: e.target.value })}
+                />
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="btn-secondary" onClick={() => setCrearTratoModalOpen(false)}>Cancelar</button>
+                <button type="submit" className="btn-primary">Crear trato</button>
+              </div>
+            </form>
           </div>
         </div>
       )}

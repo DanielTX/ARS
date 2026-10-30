@@ -1,14 +1,5 @@
-// ── TRATOS VIEW ──
-const tratos = [
-  { id: 1, title: 'Bustos - Almacenaje + f...', etapa: 'Negociación', valor: 'USD 14.000', resp: 'Diego Paranas', empresa: 'Patagonia Seafood', persona: 'Marina Bustos', cierre: '31/8/2026', prob: '50%' },
-  { id: 2, title: 'Vega - Flete aéreo expresa', etapa: 'Cerrado ✓', valor: 'USD 25.000', resp: 'Valentina Ríos', empresa: 'Sara Textiles', persona: 'Camila Vega', cierre: '15/8/2026', prob: '25%' },
-  { id: 3, title: 'Díaz - Almacenaje - Fuli...', etapa: 'Lead nuevo', valor: 'USD 1.800', resp: 'Laura Jiménez', empresa: 'Tecnar Distribución', persona: 'Mateo Díaz', cierre: '22/8/2026', prob: '0%', tags: ['Mañana', 'Activo'] },
-  { id: 4, title: 'Ramón - Flete marítimo...', etapa: 'Negociación', valor: 'USD 3.500', resp: 'Diego Paranas', empresa: 'Patagonia Seafood', persona: 'Julieta Ramón', cierre: '11/8/2026', prob: '54%' },
-  { id: 5, title: 'Vega - Seguro de camiones...', etapa: 'Cerrado ✓', valor: 'USD 28.000', resp: 'Diego Paranas', empresa: 'Sara Textiles', persona: 'Sierra Textiles', cierre: '11/9/2026', prob: '21%' },
-  { id: 6, title: 'López - Almacenaje + fu...', etapa: 'Negociación', valor: 'USD 15.000', resp: 'Lía — Saller Comer...', empresa: 'Andex Trading Co.', persona: 'Ramiro López', cierre: '31/8/2026', prob: '37%', tags: ['Activo'] },
-  { id: 7, title: 'Quiroga - Flete marítimo...', etapa: 'Propuesta enviada', valor: 'USD 6.000', resp: 'Condillos Wines', empresa: 'Condillos Wines', persona: 'Evan Quiroga', cierre: '21/8/2026', prob: '22%' },
-  { id: 8, title: 'Bustos - Flete marítimo...', etapa: 'Negociación', valor: 'USD 21.000', resp: 'Sara Navara', empresa: 'Patagonia Seafood', persona: 'Marina Bustos', cierre: '31/8/2026', prob: '79%' },
-];
+import { useState, useEffect } from 'react';
+import { getStoredTratos } from '../data/crmData';
 
 const etapaColor = {
   'Negociación': { bg: '#ff6b9d20', color: '#ff6b9d' },
@@ -18,6 +9,13 @@ const etapaColor = {
 };
 
 export default function Tratos() {
+  const [tratos, setTratos] = useState(getStoredTratos());
+
+  useEffect(() => {
+    const handleUpdate = () => setTratos(getStoredTratos());
+    window.addEventListener('crm_tratos_updated', handleUpdate);
+    return () => window.removeEventListener('crm_tratos_updated', handleUpdate);
+  }, []);
   return (
     <div className="view-container">
       <div className="view-header">

@@ -121,6 +121,10 @@ async function initDb() {
         details JSONB,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
+
+      ALTER TABLE whatsapp_chats ADD COLUMN IF NOT EXISTS favorito BOOLEAN DEFAULT false;
+      ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS fijado BOOLEAN DEFAULT false;
+      ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS destacado BOOLEAN DEFAULT false;
     `);
     console.log('[NeonDB] Tablas inicializadas con éxito en PostgreSQL');
   } catch (err) {
@@ -158,7 +162,9 @@ async function getChats() {
       vendedor: m.vendedor,
       mediaType: m.media_type,
       mediaUrl: m.media_url,
-      mediaFilename: m.media_filename
+      mediaFilename: m.media_filename,
+      pinned: !!m.fijado,
+      destacado: !!m.destacado
     });
   }
 
@@ -170,6 +176,7 @@ async function getChats() {
     unread: parseInt(c.unread) || 0,
     archivado: !!c.archivado,
     fijado: !!c.fijado,
+    favorito: !!c.favorito,
     silenciado: !!c.silenciado,
     cerrado: !!c.cerrado,
     vendedores: Array.isArray(c.vendedores) ? c.vendedores : [],
@@ -274,7 +281,7 @@ async function updateChatMeta(chatId, fields) {
   let idx = 2;
 
   for (const key of keys) {
-    if (['archivado', 'fijado', 'silenciado', 'cerrado', 'nombre', 'unread'].includes(key)) {
+    if (['archivado', 'fijado', 'favorito', 'silenciado', 'cerrado', 'nombre', 'unread'].includes(key)) {
       sets.push(`${key} = $${idx}`);
       values.push(fields[key]);
       idx++;
@@ -292,6 +299,50 @@ async function updateChatMeta(chatId, fields) {
       WHERE id = $1
     `, values);
   }
+}
+
+// Actualizar fijado o destacado de un mensaje específico
+async function updateMessageMeta(messageId, fields) {
+  const sets = [];
+  const values = [messageId];
+  let idx = 2;
+
+  if (typeof fields.pinned !== 'undefined' || typeof fields.fijado !== 'undefined') {
+    sets.push(`fijado = $${idx}`);
+    values.push(fields.pinned !== undefined ? fields.pinned : fields.fijado);
+    idx++;
+  }
+  if (typeof fields.destacado !== 'undefined') {
+    sets.push(`destacado = $${idx}`);
+    values.push(fields.destacado);
+    idx++;
+  }
+
+  if (sets.length > 0) {
+    await pool.query(`
+      UPDATE whatsapp_messages
+      SET ${sets.join(', ')}
+      WHERE id = $1
+    `, values);
+  }
+}
+
+// Eliminar un mensaje específico de NeonDB
+async function deleteMessage(messageId) {
+  await pool.query('DELETE FROM whatsapp_messages WHERE id = $1', [messageId]);
+}
+
+// Vaciar los mensajes de un chat conservando la conversación
+async function clearChatMessages(chatId) {
+  const cleanId = String(chatId).replace(/\D/g, '');
+  await pool.query('DELETE FROM whatsapp_messages WHERE chat_id = $1', [cleanId]);
+  await pool.query('UPDATE whatsapp_chats SET preview = $1 WHERE id = $2', ['', cleanId]);
+}
+
+// Eliminar un chat por completo (mensajes se eliminan en cascada)
+async function deleteChat(chatId) {
+  const cleanId = String(chatId).replace(/\D/g, '');
+  await pool.query('DELETE FROM whatsapp_chats WHERE id = $1', [cleanId]);
 }
 
 // Subir archivo a Neon Object Storage (S3)
@@ -332,6 +383,10 @@ module.exports = {
   saveOutgoingMessage,
   markChatAsRead,
   updateChatMeta,
+  updateMessageMeta,
+  deleteMessage,
+  clearChatMessages,
+  deleteChat,
   uploadToS3,
   savePublication,
   formatPeruTime,

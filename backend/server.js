@@ -14,6 +14,10 @@ const {
   saveOutgoingMessage,
   markChatAsRead,
   updateChatMeta,
+  updateMessageMeta,
+  deleteMessage,
+  clearChatMessages,
+  deleteChat,
   uploadToS3,
   savePublication
 } = require('./db');
@@ -374,6 +378,58 @@ app.post('/api/whatsapp/chat-meta', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[POST /api/whatsapp/chat-meta Error]:', err.message);
     res.status(500).json({ error: 'Error actualizando chat en NeonDB', details: err.message });
+  }
+});
+
+// 5b. Actualizar metadatos de un mensaje (fijar, destacar) en NeonDB
+app.post('/api/whatsapp/message-meta', requireAuth, async (req, res) => {
+  const { messageId, fields } = req.body;
+  if (!messageId || !fields) return res.status(400).json({ error: 'Faltan parámetros: messageId y fields' });
+  try {
+    await updateMessageMeta(messageId, fields);
+    res.json({ success: true, messageId, fields });
+  } catch (err) {
+    console.error('[POST /api/whatsapp/message-meta Error]:', err.message);
+    res.status(500).json({ error: 'Error actualizando mensaje', details: err.message });
+  }
+});
+
+// 5c. Eliminar un mensaje de NeonDB
+app.post('/api/whatsapp/message-delete', requireAuth, async (req, res) => {
+  const { messageId } = req.body;
+  if (!messageId) return res.status(400).json({ error: 'Falta messageId' });
+  try {
+    await deleteMessage(messageId);
+    res.json({ success: true, messageId });
+  } catch (err) {
+    console.error('[POST /api/whatsapp/message-delete Error]:', err.message);
+    res.status(500).json({ error: 'Error eliminando mensaje', details: err.message });
+  }
+});
+
+// 5d. Vaciar mensajes de un chat en NeonDB
+app.post('/api/whatsapp/chat-clear', requireAuth, async (req, res) => {
+  const { chatId } = req.body;
+  if (!chatId) return res.status(400).json({ error: 'Falta chatId' });
+  try {
+    await clearChatMessages(chatId);
+    res.json({ success: true, chatId });
+  } catch (err) {
+    console.error('[POST /api/whatsapp/chat-clear Error]:', err.message);
+    res.status(500).json({ error: 'Error vaciando mensajes del chat', details: err.message });
+  }
+});
+
+// 5e. Eliminar chat completo de NeonDB
+app.post('/api/whatsapp/chat-delete', requireAuth, async (req, res) => {
+  const { chatId } = req.body;
+  if (!chatId) return res.status(400).json({ error: 'Falta chatId' });
+  try {
+    await deleteChat(chatId);
+    res.json({ success: true, chatId });
+  } catch (err) {
+    console.error('[POST /api/whatsapp/chat-delete Error]:', err.message);
+    res.status(500).json({ error: 'Error eliminando chat', details: err.message });
   }
 });
 

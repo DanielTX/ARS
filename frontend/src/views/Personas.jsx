@@ -1,20 +1,15 @@
-// ── PERSONAS VIEW ──
-const personas = [
-  { id: 1, nombre: 'Agustina Vidal', email: 'agustina.vidal@llventino', telefono: '', cargo: 'Fundadora', empresa: 'Sector Cinco Décor', resp: 'Sofia Navara', tags: ['Mañana'], act: '—' },
-  { id: 2, nombre: 'André Castro', email: 'andrea.castro@avacen.e...', telefono: '+1(555) 771 4515', cargo: 'Coordinación de Pr...', empresa: 'Norvet Agr Químico', resp: 'Valentina Ríos', tags: ['Mañana', 'Carne'], act: '—' },
-  { id: 3, nombre: 'Antonella Roz', email: 'antonella.roz@conditi-m...', telefono: '', cargo: 'Responsable de Im...', empresa: 'Nordika Importa Srl', resp: 'Sofia Navara', tags: [], act: '—' },
-  { id: 4, nombre: 'Benjamín Molina', email: 'benjamin.molina@atlema...', telefono: '+1(555) 445 7765', cargo: 'Responsable de Co...', empresa: 'AtleMar Logística Fer...', resp: 'Mariana Ferreyre', tags: ['Manzana', 'Distribu...'], act: '—' },
-  { id: 5, nombre: 'Bianca Ferrero', email: 'bianca.ferrero@lumen-e...', telefono: '', cargo: 'Directora de Come...', empresa: 'Lumen Eléctrico Arsa', resp: 'Valentina Ríos', tags: [], act: '—' },
-  { id: 6, nombre: 'Camila Fuentes', email: 'camila.fuentes@austral-f...', telefono: '', cargo: 'Jefa de Comanda...', empresa: 'Austral Fresh Foods', resp: 'Sofia Navara', tags: [], act: '—' },
-  { id: 7, nombre: 'Cara Domínguez', email: 'cara.dominguez@dif...', telefono: '+1(555) 553-007', cargo: 'Directora de Opera...', empresa: '', resp: 'Mariana Ferreyre', tags: [], act: '—' },
-  { id: 8, nombre: 'Carolina Nuñez', email: 'carolina.nuñez@proceso-...', telefono: '', cargo: 'Directora Comercial', empresa: 'Pro Clave Cosmética', resp: 'Valentina Ríos', tags: [], act: '—' },
-  { id: 9, nombre: 'Diego Herrera', email: 'diego.herrea@clenoyda...', telefono: '', cargo: 'Analista', empresa: 'Blanco & Cía Textil', resp: 'Valentina Ríos', tags: [], act: '—' },
-  { id: 10, nombre: 'Elena Quiroga', email: 'elena.quiroga@condlure...', telefono: '', cargo: 'Gerenta de Opera...', empresa: 'Condillos Wines', resp: 'Laura Giménez', tags: [], act: '—' },
-  { id: 11, nombre: 'Emilio Ramos', email: 'emilio.ramos@para-textil...', telefono: '+1(555) 299-1454', cargo: 'Gerente de Planta', empresa: 'Sara Textiles', resp: 'Valentina Ríos', tags: [], act: '—' },
-  { id: 12, nombre: 'Emilio Turco', email: 'emilio.turco@condilore...', telefono: '+1(555) 299-1454', cargo: 'Gerente General', empresa: 'Condillos Wines', resp: 'Laura Giménez', tags: [], act: '—' },
-];
+import { useState, useEffect } from 'react';
+import { getStoredPersonas } from '../data/crmData';
 
 export default function Personas() {
+  const [personas, setPersonas] = useState(getStoredPersonas());
+
+  useEffect(() => {
+    const handleUpdate = () => setPersonas(getStoredPersonas());
+    window.addEventListener('crm_personas_updated', handleUpdate);
+    return () => window.removeEventListener('crm_personas_updated', handleUpdate);
+  }, []);
+
   return (
     <div className="view-container">
       <div className="view-header">
