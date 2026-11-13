@@ -13,7 +13,7 @@ export const INITIAL_PERSONAS = [
   { id: 10, nombre: 'Elena Quiroga', email: 'elena.quiroga@condillos.com', telefono: '+1(555) 774-2211', cargo: 'Gerenta de Operaciones', empresa: 'Condillos Wines', resp: 'Laura Giménez', tags: [], act: 'hace 3 semanas', pais: 'Argentina' },
   { id: 11, nombre: 'Emilio Ramos', email: 'emilio.ramos@saratextil.com', telefono: '+1(555) 299-1454', cargo: 'Gerente de Planta', empresa: 'Sara Textiles', resp: 'Valentina Ríos', tags: [], act: 'hace 1 mes', pais: 'Colombia' },
   { id: 12, nombre: 'Emilio Turco', email: 'emilio.turco@condillos.com', telefono: '+1(555) 299-1455', cargo: 'Gerente General', empresa: 'Condillos Wines', resp: 'Laura Giménez', tags: [], act: 'hace 1 mes', pais: 'Argentina' },
-  { id: 13, nombre: 'Daniel', email: 'daniel@autopost-crm.com', telefono: '+51 902 794 444', cargo: 'Gerente Comercial', empresa: 'Andex Trading Co.', resp: 'Marcos Ferreyra', tags: ['Nuevo lead'], act: 'Hoy', pais: 'Perú' },
+  { id: 13, nombre: 'Daniel', email: 'daniel@ars-soluciones.com', telefono: '+51 902 794 444', cargo: 'Gerente Comercial', empresa: 'Andex Trading Co.', resp: 'Marcos Ferreyra', tags: ['Nuevo lead'], act: 'Hoy', pais: 'Perú' },
   { id: 14, nombre: 'Ramiro López', email: 'ramiro.lopez@andex-trading-co.com', telefono: '+1(555) 262-1283', cargo: 'Gerente Comercial Local CAN', empresa: 'Andex Trading Co.', resp: 'Marcos Ferreyra', tags: ['Activo'], act: 'Hoy', pais: 'Perú' },
   { id: 15, nombre: 'Capricho Hair Nails', email: 'contacto@capricho-hair.com', telefono: '+51 932 890 838', cargo: 'Propietaria / Administración', empresa: 'Capricho Salón & Spa', resp: 'Daniel Valiente', tags: ['Nuevo lead'], act: 'Hoy', pais: 'Perú' },
 ];

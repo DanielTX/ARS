@@ -60,8 +60,8 @@ function LoginPage({ onLogin }) {
               </defs>
             </svg>
           </div>
-          <div className="login-brand">AutoPost</div>
-          <div className="login-tagline">Sistema de automatización de redes sociales</div>
+          <div className="login-brand">ARS Soluciones</div>
+          <div className="login-tagline">Acción, Respuesta & Seguimiento de Clientes</div>
         </div>
 
         {/* Formulario */}
@@ -153,7 +153,7 @@ function LoginPage({ onLogin }) {
         </form>
 
         <p className="login-footer-note">
-          Acceso exclusivo · AutoPost System © 2026
+          Acceso exclusivo · ARS Soluciones © 2026
         </p>
       </div>
     </div>

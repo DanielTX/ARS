@@ -2239,7 +2239,7 @@ export default function Mensajes() {
                     {activeChat.vendedores[0] || 'Marcos Ferreyra'}
                   </div>
                   <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
-                    {(activeChat.vendedores[0] || 'Marcos Ferreyra').toLowerCase().replace(/\s+/g, '.')}@autopost-crm.com
+                    {(activeChat.vendedores[0] || 'Marcos Ferreyra').toLowerCase().replace(/\s+/g, '.')}@ars-soluciones.com
                   </div>
                 </div>
               </div>

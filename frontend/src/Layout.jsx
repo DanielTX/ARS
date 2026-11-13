@@ -108,7 +108,7 @@ export default function Layout({ currentView, onNavigate, onLogout, username, ch
           <div
             className="sidebar-logo-icon"
             onClick={sidebarCollapsed ? toggleSidebar : undefined}
-            title={sidebarCollapsed ? 'AutoPost CRM · Click para expandir' : 'AutoPost CRM'}
+            title={sidebarCollapsed ? 'ARS Soluciones · Click para expandir' : 'ARS Soluciones'}
             style={{ cursor: sidebarCollapsed ? 'pointer' : 'default' }}
           >
             <svg viewBox="0 0 24 24" fill="none">
@@ -123,8 +123,8 @@ export default function Layout({ currentView, onNavigate, onLogout, username, ch
           </div>
           {!sidebarCollapsed && (
             <div className="sidebar-brand-text">
-              <span className="sidebar-brand-name">AutoPost</span>
-              <span className="sidebar-brand-sub">CRM Suite</span>
+              <span className="sidebar-brand-name">ARS</span>
+              <span className="sidebar-brand-sub">Soluciones</span>
             </div>
           )}
         </div>
@@ -198,7 +198,7 @@ export default function Layout({ currentView, onNavigate, onLogout, username, ch
               </svg>
             </button>
             <div className="topbar-breadcrumb">
-              <span className="breadcrumb-root">AutoPost CRM</span>
+              <span className="breadcrumb-root">ARS Soluciones</span>
               <span className="breadcrumb-sep">/</span>
               <span className="breadcrumb-current">{activeLabel}</span>
             </div>
