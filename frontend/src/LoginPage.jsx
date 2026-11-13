@@ -2,12 +2,28 @@ import { useState } from 'react';
 import axios from 'axios';
 
 function LoginPage({ onLogin }) {
-  const [username, setUsername] = useState('');
+  const [rememberMe, setRememberMe] = useState(() => {
+    try {
+      return localStorage.getItem('ap_remember_me') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [username, setUsername] = useState(() => {
+    try {
+      return localStorage.getItem('ap_remember_me') === 'true'
+        ? (localStorage.getItem('ap_saved_username') || '')
+        : '';
+    } catch {
+      return '';
+    }
+  });
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [shake, setShake] = useState(false);
+  const [showForgotNotice, setShowForgotNotice] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -24,6 +40,13 @@ function LoginPage({ onLogin }) {
       const response = await axios.post('/api/auth/login', { username, password });
       if (response.data.success && response.data.token) {
         localStorage.setItem('ap_token', response.data.token);
+        if (rememberMe) {
+          localStorage.setItem('ap_remember_me', 'true');
+          localStorage.setItem('ap_saved_username', username.trim());
+        } else {
+          localStorage.removeItem('ap_remember_me');
+          localStorage.removeItem('ap_saved_username');
+        }
         onLogin(response.data.token);
       }
     } catch (err) {
@@ -139,6 +162,26 @@ function LoginPage({ onLogin }) {
             </div>
           )}
 
+          {/* Opciones: Recordarme & ¿Olvidaste tu contraseña? */}
+          <div className="login-options-row">
+            <label className="login-remember-label">
+              <input
+                type="checkbox"
+                className="login-remember-checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+              />
+              <span>Recordarme</span>
+            </label>
+            <button
+              type="button"
+              className="login-forgot-btn"
+              onClick={() => setShowForgotNotice(true)}
+            >
+              ¿Olvidaste tu contraseña?
+            </button>
+          </div>
+
           <button
             id="login-submit"
             type="submit"
@@ -156,6 +199,42 @@ function LoginPage({ onLogin }) {
           Acceso exclusivo · ARS Soluciones © 2026
         </p>
       </div>
+
+      {/* Modal / Notificación: ¿Olvidaste tu contraseña? */}
+      {showForgotNotice && (
+        <div className="modal-backdrop" onClick={() => setShowForgotNotice(false)}>
+          <div className="modal-box" style={{ maxWidth: '420px', padding: '24px' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+              <div style={{ fontWeight: 700, fontSize: '16px', color: 'var(--text)' }}>
+                Recuperación de contraseña
+              </div>
+              <button
+                type="button"
+                className="contact-panel-close-btn"
+                onClick={() => setShowForgotNotice(false)}
+                title="Cerrar"
+              >
+                ✕
+              </button>
+            </div>
+            <p style={{ fontSize: '13px', color: 'var(--muted)', lineHeight: '1.5', margin: '0 0 16px 0' }}>
+              Por políticas de seguridad corporativa en <strong>ARS Soluciones</strong>, el restablecimiento de contraseñas es gestionado directamente por el administrador del sistema.
+            </p>
+            <div style={{ background: 'var(--surface2)', padding: '12px 14px', borderRadius: '10px', fontSize: '12px', border: '1px solid var(--border)', marginBottom: '18px' }}>
+              <div>👤 <strong>Administrador:</strong> Daniel</div>
+              <div style={{ marginTop: '4px' }}>📧 <strong>Contacto:</strong> soporte@ars-soluciones.com</div>
+            </div>
+            <button
+              type="button"
+              className="login-btn"
+              style={{ padding: '10px', fontSize: '13px', marginTop: 0 }}
+              onClick={() => setShowForgotNotice(false)}
+            >
+              Entendido
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

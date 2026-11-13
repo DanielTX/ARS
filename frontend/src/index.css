@@ -587,6 +587,50 @@ footer.main-footer .footer-divider {
   animation: fadeUp .3s ease;
 }
 
+/* ── LOGIN OPTIONS ROW (Recordarme & ¿Olvidaste tu contraseña?) ── */
+.login-options-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: -4px;
+  margin-bottom: 2px;
+  font-size: 13px;
+}
+.login-remember-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--muted);
+  user-select: none;
+  font-size: 13px;
+  transition: color 0.15s ease;
+}
+.login-remember-label:hover {
+  color: var(--text);
+}
+.login-remember-checkbox {
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+.login-forgot-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #7c6dff;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: color 0.15s ease, text-decoration 0.15s ease;
+}
+.login-forgot-btn:hover {
+  color: #a397ff;
+  text-decoration: underline;
+}
+
 .login-btn {
   width: 100%;
   padding: 14px;
